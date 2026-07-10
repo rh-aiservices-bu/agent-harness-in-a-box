@@ -60,16 +60,23 @@ check "Gateway pod running" oc -n "$NAMESPACE" wait --for=condition=Ready pod -l
 check "Gateway service exists" oc -n "$NAMESPACE" get svc openshell
 check "Gateway route exists" oc -n "$NAMESPACE" get route openshell-gw
 
-step "MLflow checks (optional)"
-if oc -n "$NAMESPACE" get deployment mlflow &>/dev/null; then
-    check "MLflow pod running" oc -n "$NAMESPACE" wait --for=condition=Ready pod -l app=mlflow --timeout=10s
-    check "MLflow service exists" oc -n "$NAMESPACE" get svc mlflow
-    MLF_ROUTE=$(oc -n "$NAMESPACE" get route mlflow -o jsonpath='{.spec.host}' 2>/dev/null || echo "")
-    if [ -n "$MLF_ROUTE" ]; then
-        check "MLflow health endpoint" curl -sf --max-time 5 "http://$MLF_ROUTE/health"
+step "RHOAI MLflow checks"
+OCP_TOKEN=$(oc whoami -t 2>/dev/null || true)
+if [ -n "$OCP_TOKEN" ]; then
+    if [ -f "$REPO_ROOT/.env" ]; then
+        source "$REPO_ROOT/.env"
+    fi
+    MLF_URI="${MLFLOW_TRACKING_URI:-https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow}"
+    MLF_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $OCP_TOKEN" "${MLF_URI}/health" 2>/dev/null)
+    if [ "$MLF_CODE" = "200" ]; then
+        info "PASS: RHOAI MLflow health (HTTP 200)"
+        PASSED=$((PASSED + 1))
+    else
+        error "FAIL: RHOAI MLflow health (HTTP $MLF_CODE)"
+        FAILED=$((FAILED + 1))
     fi
 else
-    info "SKIP: MLflow not deployed (optional)"
+    info "SKIP: RHOAI MLflow (no OCP token)"
 fi
 
 echo ""

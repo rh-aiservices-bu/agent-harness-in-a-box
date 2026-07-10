@@ -9,6 +9,7 @@ Structured demos for running OpenShell and AI coding agents on OpenShift.
 | `common/` | Shared bash functions and pre-flight checks |
 | `demos/01-basic-openshell/` | Basic OpenShell installation on OpenShift (no auth) |
 | `demos/02-opencode-keycloak/` | OpenCode + Keycloak OIDC auth + optional MLflow |
+| `demos/03-claude-code/` | Claude Code + LiteLLM + MLflow (separate from OpenCode) |
 
 ## Key Concepts
 

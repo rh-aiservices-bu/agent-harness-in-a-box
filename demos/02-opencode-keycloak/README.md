@@ -30,7 +30,7 @@ Deploy OpenShell on OpenShift with Keycloak authentication, OpenCode as the AI c
 +---------+--------+         +---------+---------+
           |                            |
           |  inference.local           | (optional)
-          +----------------------------+-----------> MLflow
+          +----------------------------+-----------> RHOAI MLflow
 ```
 
 **How OIDC works with OpenShell:**
@@ -58,6 +58,8 @@ The original openshell-demo uses Dex as an OIDC bridge for GitHub OAuth. Keycloa
 
 ```bash
 bash install.sh
+bash verify.sh          # check all components
+bash setup-sandbox.sh   # create sandbox with LiteLLM + MLflow
 ```
 
 This runs all steps below automatically. Continue reading for the manual walkthrough.
@@ -248,153 +250,78 @@ Verify authentication works:
 openshell status
 ```
 
-### Step 9: Build the OpenCode sandbox image (optional)
+### Step 9: Create an OpenCode sandbox
 
-If you want to use a custom sandbox image with OpenCode pre-installed:
+The recommended approach uses `setup-sandbox.sh`, which creates the sandbox, uploads OpenCode config, and injects LiteLLM + MLflow credentials:
 
 ```bash
-cd sandbox-image
+# Ensure .env exists with your credentials
+cp ../../.env.example ../../.env
+# Edit .env with your LiteLLM endpoint and API key
 
-# Build the image
-podman build --platform linux/amd64 -t opencode-sandbox:latest -f Containerfile .
-
-# Tag and push to a registry accessible from your cluster
-podman tag opencode-sandbox:latest quay.io/<your-org>/opencode-sandbox:latest
-podman push quay.io/<your-org>/opencode-sandbox:latest
+bash setup-sandbox.sh
 ```
 
-The Containerfile builds on the `openshell-base` image (UBI 10 minimal) and adds Node.js + OpenCode 1.17.1.
-
-If you skip this step, sandboxes will use the default image from the Helm chart.
-
-### Step 10: Create an OpenCode sandbox
-
-Create a sandbox (optionally with the custom image):
+To use a pre-baked sandbox image (OpenCode already installed):
 
 ```bash
-# With default image
-openshell sandbox create --name opencode-test
-
-# With custom OpenCode image
-openshell sandbox create --name opencode-test \
-    --image quay.io/<your-org>/opencode-sandbox:latest
+SANDBOX_IMAGE=quay.io/rcarrata/agentic-harness-openshell:opencode-v1 \
+    bash setup-sandbox.sh
 ```
 
-Connect to it:
+Connect and run OpenCode (credentials are auto-loaded from `.profile`):
 
 ```bash
-openshell sandbox connect opencode-test
-```
-
-Inside the sandbox, configure OpenCode with your LiteLLM API key and start coding:
-
-```bash
-# Set your LiteLLM API key (OpenAI-compatible endpoint)
-export OPENAI_API_KEY="your-litellm-key"
-export OPENAI_BASE_URL="https://your-litellm-endpoint.example.com/v1"
-
-# Run OpenCode
+openshell sandbox connect opencode-demo
 opencode
 ```
 
-### Step 11: Configure LiteLLM inference
-
-Register a LiteLLM-compatible API as an OpenShell provider:
+**Build your own sandbox image (optional):**
 
 ```bash
-# Register the LiteLLM provider
+cd sandbox-image
+podman build --platform linux/amd64 \
+    -t quay.io/<your-org>/opencode-sandbox:latest \
+    -f Containerfile.openshell .
+podman push quay.io/<your-org>/opencode-sandbox:latest
+```
+
+Then use it: `SANDBOX_IMAGE=quay.io/<your-org>/opencode-sandbox:latest bash setup-sandbox.sh`
+
+**Manual sandbox creation (without setup script):**
+
+```bash
+openshell sandbox create --name opencode-test \
+    --from quay.io/<your-org>/opencode-sandbox:latest
+openshell sandbox connect opencode-test
+
+# Inside the sandbox, set credentials manually:
+export OPENAI_API_KEY="your-litellm-key"
+export OPENAI_BASE_URL="https://your-litellm-endpoint.example.com/v1"
+opencode
+```
+
+### Step 10: Configure LiteLLM inference
+
+If you used `setup-sandbox.sh`, this is already done. For manual setup:
+
+```bash
 openshell provider create openai \
     --name litellm \
     --base-url https://your-litellm-endpoint.example.com/v1 \
     --api-key <your-api-key>
 
-# Route inference through the provider
 openshell inference set --provider litellm --model gpt-oss-120b --role user
 openshell inference set --provider litellm --model llama-scout-17b --role system
-```
 
-**Apply the network policy** so sandboxes can reach LiteLLM:
-
-```bash
 openshell policy set --global --policy config/policy.yaml --yes
 ```
 
-**Direct API access from sandbox:**
+### Step 11: Configure RHOAI MLflow tracing (optional)
 
-The simplest approach is to pass API credentials directly into the sandbox via environment variables. This bypasses inference.local and talks directly to LiteLLM:
+`setup-sandbox.sh` configures MLflow automatically when an OCP token is available. For manual setup, see `overlays/mlflow/README.md`.
 
-```bash
-# Inside the sandbox
-curl -X POST https://your-litellm-endpoint.example.com/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"llama-scout-17b","messages":[{"role":"user","content":"Hello"}]}'
-```
-
-See `overlays/vllm/` for deploying a self-hosted vLLM model server instead.
-
-### Step 12: Deploy MLflow for tracing
-
-Deploy a standalone MLflow server for agent activity tracking:
-
-```bash
-oc apply -f overlays/mlflow/deployment.yaml
-oc -n openshell rollout status deployment/mlflow --timeout=120s
-```
-
-Create an experiment:
-
-```bash
-MLFLOW_URL="http://mlflow.openshell.svc.cluster.local:5000"
-curl -s -X POST "$MLFLOW_URL/api/2.0/mlflow/experiments/create" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"opencode-sandbox"}'
-```
-
-Inside a sandbox, configure MLflow tracing:
-
-```bash
-export MLFLOW_TRACKING_URI="http://mlflow.openshell.svc.cluster.local:5000"
-export MLFLOW_EXPERIMENT_NAME="opencode-sandbox"
-```
-
-Access the MLflow UI:
-
-```bash
-echo "http://$(oc -n openshell get route mlflow -o jsonpath='{.spec.host}')"
-```
-
-See `overlays/mlflow/README.md` for detailed setup instructions.
-
-### Step 13: Claude Code in sandbox (optional)
-
-Claude Code can also run inside OpenShell sandboxes:
-
-```bash
-# Build the Claude Code sandbox image
-cd sandbox-image
-podman build --platform linux/amd64 -t claude-code-sandbox:latest -f Containerfile.claude-code .
-podman tag claude-code-sandbox:latest quay.io/<your-org>/claude-code-sandbox:latest
-podman push quay.io/<your-org>/claude-code-sandbox:latest
-cd ..
-```
-
-Create a sandbox with Claude Code:
-
-```bash
-openshell sandbox create --name claude-sandbox \
-    --image quay.io/<your-org>/claude-code-sandbox:latest
-openshell sandbox connect claude-sandbox
-```
-
-Inside the sandbox:
-
-```bash
-export ANTHROPIC_API_KEY="your-anthropic-key"
-claude
-```
-
-The network policy (`config/policy.yaml`) already includes `api.anthropic.com` access.
+Access the RHOAI MLflow dashboard at the route exposed by OpenShift AI and navigate to the `openshell` workspace.
 
 ## Teardown
 

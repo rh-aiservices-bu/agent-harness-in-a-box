@@ -1,0 +1,296 @@
+# Demo 1: Basic OpenShell on OpenShift
+
+Install OpenShell gateway on OpenShift with no authentication. This is the simplest way to get started and experiment with sandboxed agent runtimes.
+
+## What You Will Learn
+
+- How OpenShell deploys on OpenShift via Helm
+- Why sandbox pods need the privileged Security Context Constraint
+- How the gateway manages sandbox lifecycle through the Agent Sandbox CRD
+- How to create, connect to, and manage sandboxes
+
+## Architecture
+
+```
++------------------+       +-----------------------+       +------------------+
+|                  |  gRPC |                       |  K8s  |                  |
+|  openshell CLI   +------>+  OpenShell Gateway     +------>+  Sandbox Pods    |
+|  (workstation)   |       |  (StatefulSet)         |       |  (Agent Sandbox) |
+|                  |       |                       |       |                  |
++------------------+       +-----------+-----------+       +------------------+
+                                       |
+                                  OpenShift
+                                  Route (HTTP)
+```
+
+The gateway runs as a StatefulSet with a 1Gi PVC for its SQLite database. It creates and manages sandbox pods through the Agent Sandbox CRD. The CLI communicates with the gateway via gRPC, exposed through an OpenShift Route.
+
+## Prerequisites
+
+- OpenShift 4.19+ cluster with cluster-admin access
+- `oc` CLI configured and logged in
+- Helm 3.x installed
+- `openshell` CLI installed on your workstation
+
+### Install the openshell CLI
+
+```bash
+# macOS
+brew install nvidia/openshell/openshell
+
+# Linux
+curl -fsSL https://docs.nvidia.com/openshell/latest/install.sh | bash
+
+# Verify
+openshell --version
+```
+
+## Quick Start (Automated)
+
+```bash
+bash install.sh
+```
+
+This runs all 7 steps below automatically. Continue reading for the manual walkthrough.
+
+## Step-by-Step Guide
+
+### Step 1: Install Agent Sandbox CRDs
+
+The Agent Sandbox project (kubernetes-sigs/agent-sandbox) provides the `Sandbox` custom resource definition that OpenShell uses to manage sandbox pod lifecycle.
+
+```bash
+oc apply -f \
+    https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/manifest.yaml
+```
+
+Wait for the controller to be ready:
+
+```bash
+oc -n agent-sandbox-system wait --for=condition=Ready pod \
+    -l control-plane=controller-manager --timeout=120s
+```
+
+Verify the CRD exists:
+
+```bash
+oc get crd sandboxes.agents.x-k8s.io
+```
+
+### Step 2: Create the namespace
+
+All OpenShell resources (gateway, sandbox pods) will run in this namespace.
+
+```bash
+oc create ns openshell
+```
+
+### Step 3: Configure Security Context Constraints
+
+Sandbox pods need the `privileged` SCC because the OpenShell supervisor (which runs inside each sandbox pod as PID 1) sets up:
+
+- **Landlock** - Filesystem access control (restricts which paths the agent can read/write)
+- **Seccomp** - System call filtering (blocks dangerous syscalls)
+- **Network namespacing** - Runs an HTTP CONNECT proxy to enforce network policy
+
+These security mechanisms require elevated privileges at startup, even though the actual agent process runs as the unprivileged `sandbox` user.
+
+```bash
+oc adm policy add-scc-to-user privileged \
+    -z openshell-sandbox -n openshell
+```
+
+The `openshell-sandbox` ServiceAccount is created by the Helm chart and is used by sandbox pods (not the gateway pod itself).
+
+### Step 4: Create JWT signing keys
+
+The OpenShell gateway uses Ed25519 JWT tokens for sandbox-to-gateway authentication. Normally, the Helm chart includes a PKI init Job that generates these keys, but that Job is not compatible with OpenShift's SCC admission controller.
+
+We create the keys manually instead:
+
+```bash
+# Generate Ed25519 keypair
+openssl genpkey -algorithm Ed25519 -out /tmp/jwt-signing.pem
+openssl pkey -in /tmp/jwt-signing.pem -pubout -out /tmp/jwt-public.pem
+
+# Generate a key ID (KID) from the public key fingerprint
+KID=$(openssl pkey -in /tmp/jwt-signing.pem -pubout -outform DER \
+    | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+echo "$KID" > /tmp/jwt-kid.txt
+
+# Create the Kubernetes secret
+oc -n openshell create secret generic openshell-jwt-keys \
+    --from-file=signing.pem=/tmp/jwt-signing.pem \
+    --from-file=public.pem=/tmp/jwt-public.pem \
+    --from-file=kid=/tmp/jwt-kid.txt
+
+# Clean up local key files
+rm -f /tmp/jwt-signing.pem /tmp/jwt-public.pem /tmp/jwt-kid.txt
+```
+
+### Step 5: Install OpenShell via Helm
+
+Install the OpenShell Helm chart with OpenShift-specific overrides:
+
+```bash
+helm install openshell oci://ghcr.io/nvidia/openshell/helm-chart \
+    --namespace openshell \
+    --set pkiInitJob.enabled=false \
+    --set server.disableTls=true \
+    --set server.auth.allowUnauthenticatedUsers=true \
+    --set podSecurityContext.fsGroup=null \
+    --set securityContext.runAsUser=null
+```
+
+**Why each override is needed:**
+
+| Override | Reason |
+|----------|--------|
+| `pkiInitJob.enabled=false` | We pre-created JWT keys in Step 4 (PKI Job is not SCC-compatible) |
+| `server.disableTls=true` | Run gateway in plaintext for evaluation. TLS would require cert-manager. |
+| `server.auth.allowUnauthenticatedUsers=true` | No authentication for this basic demo |
+| `podSecurityContext.fsGroup=null` | Clear the chart's hardcoded `fsGroup: 1000` so OpenShift SCC can assign |
+| `securityContext.runAsUser=null` | Clear the chart's hardcoded `runAsUser: 1000` so OpenShift SCC can assign |
+
+To pin a specific version, add `--version <version>` to the command.
+
+### Step 6: Wait for the gateway
+
+```bash
+oc -n openshell rollout status statefulset/openshell --timeout=300s
+```
+
+Verify the pod is running:
+
+```bash
+oc -n openshell get pods
+```
+
+Expected output:
+```
+NAME          READY   STATUS    RESTARTS   AGE
+openshell-0   1/1     Running   0          1m
+```
+
+### Step 7: Create the OpenShift Route
+
+Expose the gateway service so the CLI can reach it from your workstation:
+
+```bash
+oc -n openshell apply -f manifests/route.yaml
+```
+
+Or create it imperatively:
+
+```bash
+oc -n openshell expose svc/openshell --port=8080 --name=openshell-gw
+```
+
+Get the route URL:
+
+```bash
+oc -n openshell get route openshell-gw -o jsonpath='{.spec.host}'
+```
+
+### Step 8: Register the gateway
+
+Tell the CLI where the gateway is:
+
+```bash
+GW_URL="http://$(oc -n openshell get route openshell-gw -o jsonpath='{.spec.host}')"
+openshell gateway add "$GW_URL" --local --name openshift
+```
+
+### Step 9: Verify
+
+```bash
+openshell status
+```
+
+Expected output shows the gateway connection details and that it is healthy.
+
+You can also run the automated verification:
+
+```bash
+bash verify.sh
+```
+
+### Step 10: Create your first sandbox
+
+**Quick test (run a command and exit):**
+
+```bash
+openshell sandbox create --name test -- echo 'Hello from OpenShell!'
+```
+
+**Interactive session:**
+
+```bash
+# Create a sandbox
+openshell sandbox create --name my-sandbox
+
+# Connect to it (opens a shell inside the sandbox)
+openshell sandbox connect my-sandbox
+
+# Inside the sandbox, you are the 'sandbox' user with restricted access.
+# Try: whoami, ls /, cat /etc/os-release
+
+# Exit when done
+exit
+
+# List sandboxes
+openshell sandbox list
+
+# Delete the sandbox
+openshell sandbox delete my-sandbox
+```
+
+**Autonomous mode (run a task, get results, destroy):**
+
+```bash
+openshell sandbox create --name auto-test --no-keep -- bash -c 'echo "Task done" > /sandbox/result.txt && cat /sandbox/result.txt'
+```
+
+The `--no-keep` flag automatically deletes the sandbox after the command exits.
+
+## Teardown
+
+Remove everything installed by this demo:
+
+```bash
+bash teardown.sh
+```
+
+To also remove the Agent Sandbox CRDs (only if no other demo is using them):
+
+```bash
+bash teardown.sh --crd
+```
+
+## Troubleshooting
+
+**Gateway pod stuck in Pending:**
+Check if the PVC is bound. The gateway needs a 1Gi PVC for its SQLite database.
+```bash
+oc -n openshell get pvc
+```
+
+**SCC errors on sandbox pods:**
+Verify the SCC binding:
+```bash
+oc get clusterrolebinding | grep openshell-sandbox
+oc adm policy who-can use scc privileged -n openshell
+```
+
+**Route not resolving:**
+Verify the Route was created and has a host assigned:
+```bash
+oc -n openshell get route openshell-gw -o yaml
+```
+
+## What's Next
+
+See [Demo 2: OpenCode + Keycloak](../02-opencode-keycloak/) to add:
+- Keycloak OIDC authentication with local users
+- OpenCode AI coding agent in sandboxes
+- Optional MLflow tracing integration

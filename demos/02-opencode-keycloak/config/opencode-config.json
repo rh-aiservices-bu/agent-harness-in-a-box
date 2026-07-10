@@ -1,0 +1,42 @@
+{
+  "providers": {
+    "litellm": {
+      "name": "LiteLLM (OpenAI-compatible)",
+      "type": "openai",
+      "baseURL": "${LITELLM_BASE_URL:-https://inference.local/v1}",
+      "apiKeyEnv": "LITELLM_API_KEY",
+      "models": {
+        "gpt-oss-120b": {
+          "name": "GPT OSS 120B",
+          "maxTokens": 16384
+        },
+        "llama-scout-17b": {
+          "name": "Llama Scout 17B",
+          "maxTokens": 8192
+        }
+      }
+    },
+    "anthropic": {
+      "name": "Anthropic",
+      "type": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet 4",
+          "maxTokens": 16384
+        }
+      }
+    },
+    "vllm": {
+      "name": "vLLM (self-hosted)",
+      "type": "openai",
+      "baseURL": "${VLLM_BASE_URL:-http://localhost:8000/v1}",
+      "apiKeyEnv": "VLLM_API_KEY",
+      "models": {
+        "${VLLM_MODEL:-default}": {
+          "name": "${VLLM_MODEL:-default}"
+        }
+      }
+    }
+  }
+}

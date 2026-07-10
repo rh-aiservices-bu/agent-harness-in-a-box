@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gemma4-pvc
+  namespace: vllm
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gemma4
+  namespace: vllm
+  labels:
+    app: gemma4
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gemma4
+  template:
+    metadata:
+      labels:
+        app: gemma4
+    spec:
+      initContainers:
+      - name: download
+        image: quay.io/aipcc/rhaiis/cpu-ubi9:3.4
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          if [ -f /mnt/models/config.json ]; then
+            echo "Model already downloaded, skipping."
+          else
+            hf download google/gemma-4-31B-it --local-dir /mnt/models
+          fi
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: token
+              name: vllm-hf-token
+        volumeMounts:
+        - name: model-storage
+          mountPath: /mnt/models
+      containers:
+      - name: vllm
+        image: quay.io/aipcc/rhaiis/cuda-ubi9:3.5.0-ea.1-1779124632
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          vllm serve /mnt/models \
+            --served-model-name gemma4-31b \
+            --port 8000 \
+            --tensor-parallel-size 2 \
+            --max-model-len 65536 \
+            --enable-auto-tool-choice \
+            --tool-call-parser pythonic
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            nvidia.com/gpu: "2"
+            memory: "32Gi"
+          limits:
+            nvidia.com/gpu: "2"
+            memory: "96Gi"
+        volumeMounts:
+        - name: model-storage
+          mountPath: /mnt/models
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: gemma4-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gemma4-svc
+  namespace: vllm
+spec:
+  selector:
+    app: gemma4
+  ports:
+  - port: 8000
+    targetPort: 8000

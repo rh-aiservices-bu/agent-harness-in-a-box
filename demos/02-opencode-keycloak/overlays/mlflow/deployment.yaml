@@ -1,0 +1,77 @@
+# Standalone MLflow server for sandbox tracing.
+# Deployed in the openshell namespace for direct in-cluster access.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: openshell
+  labels:
+    app: mlflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      containers:
+      - name: mlflow
+        image: ghcr.io/mlflow/mlflow:v2.22.0
+        command: ["mlflow", "server"]
+        args:
+        - "--host=0.0.0.0"
+        - "--port=5000"
+        - "--workers=1"
+        - "--backend-store-uri=sqlite:///mlflow/mlflow.db"
+        - "--default-artifact-root=/mlflow/artifacts"
+        ports:
+        - containerPort: 5000
+          name: http
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        volumeMounts:
+        - name: mlflow-data
+          mountPath: /mlflow
+      volumes:
+      - name: mlflow-data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow
+  namespace: openshell
+  labels:
+    app: mlflow
+spec:
+  selector:
+    app: mlflow
+  ports:
+  - port: 5000
+    targetPort: 5000
+    name: http
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: mlflow
+  namespace: openshell
+spec:
+  to:
+    kind: Service
+    name: mlflow
+  port:
+    targetPort: http

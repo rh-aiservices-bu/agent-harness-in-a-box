@@ -1,0 +1,22 @@
+# RHOAI MLflow tracing environment variables for OpenCode sandboxes.
+# These are set automatically by setup-sandbox.sh at runtime.
+#
+# NOTE: The sandbox CONNECT proxy cannot reach the internal svc URL.
+# Use the external route (derived from OCP_APPS_DOMAIN in setup-sandbox.sh).
+#
+# Usage: reference for what setup-sandbox.sh configures, or for manual
+# configuration via SandboxSpec.environment field.
+
+env:
+  - name: MLFLOW_TRACKING_URI
+    value: ""  # Set at runtime: https://mlflow-redhat-ods-applications.<apps-domain>
+  - name: MLFLOW_TRACKING_TOKEN
+    value: ""  # Set at runtime via: oc whoami -t
+  - name: MLFLOW_TRACKING_INSECURE_TLS
+    value: "true"
+  - name: MLFLOW_EXPERIMENT_NAME
+    value: "opencode-sandbox"
+  - name: MLFLOW_WORKSPACE
+    value: "openshell"
+  - name: NODE_TLS_REJECT_UNAUTHORIZED
+    value: "0"  # Required for @mlflow/opencode npm plugin TLS

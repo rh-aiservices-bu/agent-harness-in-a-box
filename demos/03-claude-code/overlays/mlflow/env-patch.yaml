@@ -1,0 +1,19 @@
+# RHOAI MLflow tracing environment variables for Claude Code sandboxes.
+# These can be injected into sandbox pods via the OpenShell gRPC API
+# or set manually after connecting to a sandbox.
+#
+# Requires an OCP bearer token for authentication.
+# The token and workspace header are set by setup-sandbox.sh at runtime.
+#
+# Usage: export these variables inside a sandbox session, or use them
+# as a reference for configuring the SandboxSpec.environment field.
+
+env:
+  - name: MLFLOW_TRACKING_URI
+    value: "https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow"
+  - name: MLFLOW_EXPERIMENT_NAME
+    value: "claude-code-sandbox"
+  - name: OTEL_EXPORTER_OTLP_ENDPOINT
+    value: "https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow"
+  - name: OTEL_EXPORTER_OTLP_PROTOCOL
+    value: "http/protobuf"

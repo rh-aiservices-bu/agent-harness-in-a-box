@@ -1,0 +1,50 @@
+# OpenCode agent for OpenShell sandbox
+#
+# Flavor image built on the shared openshell-base.
+# Adds Node.js and OpenCode (MIT).
+#
+# Build:
+#   podman build --platform linux/amd64 -t opencode-sandbox:latest -f Containerfile.openshell .
+#
+# Build with specific version:
+#   podman build --build-arg OPENCODE_VERSION=1.17.1 --platform linux/amd64 -t opencode-sandbox:latest -f Containerfile.openshell .
+
+FROM quay.io/hmoghani/openshell-base:latest
+
+LABEL name="opencode" \
+      summary="OpenCode agent for OpenShell sandbox"
+
+USER 0
+
+# Node.js + Python + git (required by OpenCode, MLflow, and plugin build)
+RUN microdnf install -y --nodocs nodejs npm git python3.12 python3.12-pip && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+# MLflow tracing (Python SDK + kubernetes-namespaced auth for RHOAI)
+RUN python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12' openai
+
+# Build @mlflow/opencode plugin from source.
+# The npm release doesn't include the workspace header fix (mlflow#23927).
+# Building from the v3.14.0 tag includes it.
+RUN git clone --depth 1 --branch v3.14.0 https://github.com/mlflow/mlflow.git /tmp/mlflow \
+    && cd /tmp/mlflow/libs/typescript && npm install && npm run build \
+    && mkdir -p /opt/mlflow-plugin/core /opt/mlflow-plugin/opencode \
+    && cp -r /tmp/mlflow/libs/typescript/core/dist /opt/mlflow-plugin/core/ \
+    && cp /tmp/mlflow/libs/typescript/core/package.json /opt/mlflow-plugin/core/ \
+    && cp -r /tmp/mlflow/libs/typescript/integrations/opencode/dist /opt/mlflow-plugin/opencode/ \
+    && cp /tmp/mlflow/libs/typescript/integrations/opencode/package.json /opt/mlflow-plugin/opencode/ \
+    && rm -rf /tmp/mlflow
+
+# Install OpenCode (MIT)
+ARG OPENCODE_VERSION=1.17.1
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# Verify
+RUN opencode --version
+
+USER 1001
+WORKDIR /workspace
+ENV AGENT_NAME=opencode

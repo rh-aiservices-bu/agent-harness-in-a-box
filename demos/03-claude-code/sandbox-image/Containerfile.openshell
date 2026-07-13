@@ -1,0 +1,61 @@
+# Claude Code agent for OpenShell sandbox
+#
+# Flavor image built on the shared openshell-base.
+# Installs Claude Code via native installer (proprietary, runtime install).
+#
+# Build:
+#   podman build --platform linux/amd64 -t claude-code-sandbox:latest -f Containerfile.openshell .
+#
+# Build with specific version:
+#   podman build --build-arg CLAUDE_CODE_VERSION=2.1.206 --platform linux/amd64 -t claude-code-sandbox:latest -f Containerfile.openshell .
+
+FROM quay.io/hmoghani/openshell-base:latest
+
+LABEL name="claude-code" \
+      summary="Claude Code agent for OpenShell sandbox"
+
+ARG CLAUDE_CODE_VERSION=2.1.206
+
+USER 0
+
+# Node.js + Python (required by Claude Code and MLflow tracing)
+RUN microdnf install -y --nodocs nodejs npm python3.12 python3.12-pip && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+# MLflow tracing (Python hook + kubernetes-namespaced auth for RHOAI)
+RUN python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12' openai
+
+# Claude Code skills directory
+RUN mkdir -p /sandbox/.claude/skills && \
+    chown -R 1001:0 /sandbox/.claude && \
+    chmod -R 775 /sandbox/.claude
+
+USER 1001
+
+# Install Claude Code via native installer (version-pinned)
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
+
+ENV PATH="/sandbox/.local/bin:${PATH}" \
+    HOME="/sandbox" \
+    DISABLE_AUTOUPDATER=1
+
+# Verify
+RUN claude --version
+
+# Install MLflow stop-hook (traces every claude session automatically).
+# Tracking URI and experiment name come from env vars at runtime.
+WORKDIR /workspace
+RUN mlflow autolog claude -d /workspace
+
+# Fix permissions so the runtime SCC-assigned UID (group 0) can update settings.json
+# (mlflow autolog claude creates files with 644 under /workspace/.claude/)
+USER 0
+RUN chmod -R g+w /workspace/.claude && \
+    sed -i 's|sqlite:////workspace/mlflow.db||' /workspace/.claude/settings.json && \
+    sed -i 's|"MLFLOW_EXPERIMENT_ID": "0"|"MLFLOW_EXPERIMENT_ID": ""|' /workspace/.claude/settings.json
+USER 1001
+
+ENV AGENT_NAME=claude-code

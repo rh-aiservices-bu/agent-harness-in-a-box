@@ -25,8 +25,8 @@ RUN microdnf install -y --nodocs nodejs npm python3.12 python3.12-pip && \
     microdnf clean all && \
     rm -rf /var/cache/yum
 
-# MLflow tracing (Python hook)
-RUN python3 -m pip install --no-cache-dir 'mlflow>=3.12' openai
+# MLflow tracing (Python hook + kubernetes-namespaced auth for RHOAI)
+RUN python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12' openai
 
 # Claude Code skills directory
 RUN mkdir -p /sandbox/.claude/skills && \
@@ -45,5 +45,17 @@ ENV PATH="/sandbox/.local/bin:${PATH}" \
 # Verify
 RUN claude --version
 
+# Install MLflow stop-hook (traces every claude session automatically).
+# Tracking URI and experiment name come from env vars at runtime.
 WORKDIR /workspace
+RUN mlflow autolog claude -d /workspace
+
+# Fix permissions so the runtime SCC-assigned UID (group 0) can update settings.json
+# (mlflow autolog claude creates files with 644 under /workspace/.claude/)
+USER 0
+RUN chmod -R g+w /workspace/.claude && \
+    sed -i 's|sqlite:////workspace/mlflow.db||' /workspace/.claude/settings.json && \
+    sed -i 's|"MLFLOW_EXPERIMENT_ID": "0"|"MLFLOW_EXPERIMENT_ID": ""|' /workspace/.claude/settings.json
+USER 1001
+
 ENV AGENT_NAME=claude-code

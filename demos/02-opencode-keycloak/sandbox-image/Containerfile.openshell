@@ -16,15 +16,27 @@ LABEL name="opencode" \
 
 USER 0
 
-# Node.js + Python (required by OpenCode and MLflow tracing)
-RUN microdnf install -y --nodocs nodejs npm python3.12 python3.12-pip && \
+# Node.js + Python + git (required by OpenCode, MLflow, and plugin build)
+RUN microdnf install -y --nodocs nodejs npm git python3.12 python3.12-pip && \
     ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
     ln -sf /usr/bin/python3.12 /usr/bin/python && \
     microdnf clean all && \
     rm -rf /var/cache/yum
 
-# MLflow tracing (Python SDK + OpenAI client)
-RUN python3 -m pip install --no-cache-dir 'mlflow>=3.12' openai
+# MLflow tracing (Python SDK + kubernetes-namespaced auth for RHOAI)
+RUN python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12' openai
+
+# Build @mlflow/opencode plugin from source.
+# The npm release doesn't include the workspace header fix (mlflow#23927).
+# Building from the v3.14.0 tag includes it.
+RUN git clone --depth 1 --branch v3.14.0 https://github.com/mlflow/mlflow.git /tmp/mlflow \
+    && cd /tmp/mlflow/libs/typescript && npm install && npm run build \
+    && mkdir -p /opt/mlflow-plugin/core /opt/mlflow-plugin/opencode \
+    && cp -r /tmp/mlflow/libs/typescript/core/dist /opt/mlflow-plugin/core/ \
+    && cp /tmp/mlflow/libs/typescript/core/package.json /opt/mlflow-plugin/core/ \
+    && cp -r /tmp/mlflow/libs/typescript/integrations/opencode/dist /opt/mlflow-plugin/opencode/ \
+    && cp /tmp/mlflow/libs/typescript/integrations/opencode/package.json /opt/mlflow-plugin/opencode/ \
+    && rm -rf /tmp/mlflow
 
 # Install OpenCode (MIT)
 ARG OPENCODE_VERSION=1.17.1

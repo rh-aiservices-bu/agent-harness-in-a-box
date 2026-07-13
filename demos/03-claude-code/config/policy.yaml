@@ -140,10 +140,15 @@ network_policies:
       - { path: "**" }
 
   mlflow_rhoai:
-    name: "RHOAI MLflow (in-cluster)"
+    name: "RHOAI MLflow"
     endpoints:
       - host: "mlflow.redhat-ods-applications.svc.cluster.local"
         ports: [8443]
+        protocol: rest
+        enforcement: enforce
+        access: full
+      - host: "mlflow-redhat-ods-applications.apps.ocp.g4fp9.sandbox3225.opentlc.com"
+        ports: [443]
         protocol: rest
         enforcement: enforce
         access: full

@@ -35,6 +35,9 @@ if [ -z "$OCP_TOKEN" ]; then
     warn "Not logged into OpenShift - MLflow tracing will not work"
 fi
 
+# Sandbox-accessible MLflow URI (external route, not internal svc)
+MLFLOW_SANDBOX_URI="https://mlflow-redhat-ods-applications.${OCP_APPS_DOMAIN}"
+
 step "Apply global network policy"
 openshell policy set --global --policy "$SCRIPT_DIR/config/policy.yaml" --yes
 
@@ -89,7 +92,7 @@ cat > /tmp/sandbox-init.sh << INITHEADER
 #!/bin/sh
 LITELLM_API_KEY="${LITELLM_API_KEY}"
 LITELLM_BASE_URL="${LITELLM_BASE_URL}"
-MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI}"
+MLFLOW_TRACKING_URI="${MLFLOW_SANDBOX_URI}"
 OCP_TOKEN="${OCP_TOKEN}"
 MLFLOW_WORKSPACE="${MLFLOW_WORKSPACE:-openshell}"
 INITHEADER
@@ -98,11 +101,12 @@ cat >> /tmp/sandbox-init.sh << 'INITBODY'
 export ANTHROPIC_API_KEY="$LITELLM_API_KEY"
 export ANTHROPIC_BASE_URL="${LITELLM_BASE_URL%/v1}"
 
-# RHOAI MLflow tracing
+# RHOAI MLflow tracing (external route, Bearer token auth)
 export MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI"
 export MLFLOW_TRACKING_TOKEN="$OCP_TOKEN"
+export MLFLOW_TRACKING_INSECURE_TLS="true"
 export MLFLOW_EXPERIMENT_NAME="claude-code-sandbox"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${OCP_TOKEN},X-Mlflow-Workspace=${MLFLOW_WORKSPACE}"
+export MLFLOW_WORKSPACE="$MLFLOW_WORKSPACE"
 
 export PATH="/sandbox/.local/bin:/sandbox/.npm-global/bin:$PATH"
 
@@ -160,6 +164,36 @@ fi
 PROFILE
 '
 
+step "Configure MLflow stop-hook"
+if [ -n "$OCP_TOKEN" ]; then
+    # Patch the pre-baked settings.json with runtime RHOAI tracking URI and token.
+    # The plugin structure (settings.local.json) is already correct from build time.
+    cat > /tmp/claude-mlflow-settings.json << EOF
+{
+  "env": {
+    "MLFLOW_CLAUDE_TRACING_ENABLED": "true",
+    "MLFLOW_TRACKING_URI": "${MLFLOW_SANDBOX_URI}",
+    "MLFLOW_TRACKING_TOKEN": "${OCP_TOKEN}",
+    "MLFLOW_TRACKING_INSECURE_TLS": "true",
+    "MLFLOW_EXPERIMENT_NAME": "claude-code-sandbox",
+    "MLFLOW_WORKSPACE": "${MLFLOW_WORKSPACE:-openshell}"
+  }
+}
+EOF
+    openshell sandbox upload "$SANDBOX_NAME" /tmp/claude-mlflow-settings.json /tmp/claude-mlflow-settings.json
+    openshell sandbox exec --name "$SANDBOX_NAME" -- cp /tmp/claude-mlflow-settings.json /workspace/.claude/settings.json
+    info "MLflow stop-hook configured with RHOAI tracking URI"
+fi
+
+step "Create MLflow experiment"
+if [ -n "$OCP_TOKEN" ]; then
+    # mlflow[kubernetes] handles auth natively (Bearer token + X-Mlflow-Workspace header)
+    openshell sandbox exec --name "$SANDBOX_NAME" -- sh -c "export MLFLOW_TRACKING_URI='${MLFLOW_SANDBOX_URI}' MLFLOW_TRACKING_TOKEN='${OCP_TOKEN}' MLFLOW_TRACKING_INSECURE_TLS=true MLFLOW_WORKSPACE='${MLFLOW_WORKSPACE:-openshell}' && python3 -c 'import os, mlflow; mlflow.set_tracking_uri(os.environ[\"MLFLOW_TRACKING_URI\"]); name=\"claude-code-sandbox\"; exp=mlflow.get_experiment_by_name(name); print(exp.experiment_id if exp else mlflow.create_experiment(name))' 2>&1 || echo 'MLflow setup: non-fatal'"
+    info "MLflow experiment claude-code-sandbox created"
+else
+    warn "MLflow experiment: SKIP (no OCP token)"
+fi
+
 step "Test LiteLLM (Anthropic Messages API)"
 RESULT=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -s -w "\n%{http_code}" -X POST "${LITELLM_BASE_URL%/v1}/v1/messages" -H "x-api-key: ${LITELLM_API_KEY}" -H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" -d '{"model":"'"${LITELLM_MODEL:-gpt-oss-120b}"'","max_tokens":10,"messages":[{"role":"user","content":"Say ok"}]}' 2>&1 | grep -v "Using sandbox")
 HTTP_CODE=$(echo "$RESULT" | tail -1)
@@ -171,7 +205,7 @@ fi
 
 step "Test RHOAI MLflow from sandbox"
 if [ -n "$OCP_TOKEN" ]; then
-    MLF_CODE=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -sk -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${OCP_TOKEN}" -H "X-Mlflow-Workspace: ${MLFLOW_WORKSPACE:-openshell}" "${MLFLOW_TRACKING_URI:-https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow}/api/2.0/mlflow/experiments/search?max_results=1" 2>&1 | grep -v "Using sandbox")
+    MLF_CODE=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -sk -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${OCP_TOKEN}" -H "X-Mlflow-Workspace: ${MLFLOW_WORKSPACE:-openshell}" "${MLFLOW_SANDBOX_URI}/api/2.0/mlflow/experiments/search?max_results=1" 2>&1 | grep -v "Using sandbox")
     if [ "$MLF_CODE" = "200" ]; then
         info "RHOAI MLflow test: OK (HTTP 200)"
     else
@@ -193,5 +227,6 @@ echo " Inside the sandbox (credentials auto-loaded):"
 echo "   claude --model ${LITELLM_MODEL:-gpt-oss-120b}"
 echo ""
 echo " Model: ${LITELLM_MODEL:-gpt-oss-120b}"
-echo " MLflow: ${MLFLOW_TRACKING_URI:-https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow}"
+echo " MLflow: ${MLFLOW_SANDBOX_URI}"
+echo " MLflow traces: automatic (stop-hook fires after each session)"
 echo ""

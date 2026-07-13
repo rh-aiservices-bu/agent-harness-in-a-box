@@ -3,6 +3,7 @@
   "model": "litellm/gpt-oss-120b",
   "small_model": "litellm/llama-scout-17b",
   "enabled_providers": ["litellm"],
+  "plugin": ["@mlflow/opencode"],
   "provider": {
     "litellm": {
       "api": "openai",

@@ -35,6 +35,9 @@ if [ -z "$OCP_TOKEN" ]; then
     warn "Not logged into OpenShift - MLflow tracing will not work"
 fi
 
+# Sandbox-accessible MLflow URI (external route, not internal svc)
+MLFLOW_SANDBOX_URI="https://mlflow-redhat-ods-applications.${OCP_APPS_DOMAIN}"
+
 step "Apply global network policy"
 openshell policy set --global --policy "$SCRIPT_DIR/config/policy.yaml" --yes
 
@@ -91,7 +94,7 @@ cat > /tmp/sandbox-init.sh << INITHEADER
 #!/bin/sh
 LITELLM_API_KEY="${LITELLM_API_KEY}"
 LITELLM_BASE_URL="${LITELLM_BASE_URL}"
-MLFLOW_TRACKING_URI="${MLFLOW_TRACKING_URI}"
+MLFLOW_TRACKING_URI="${MLFLOW_SANDBOX_URI}"
 OCP_TOKEN="${OCP_TOKEN}"
 MLFLOW_WORKSPACE="${MLFLOW_WORKSPACE:-openshell}"
 INITHEADER
@@ -105,11 +108,13 @@ if [ -f /sandbox/.config/opencode/opencode.jsonc ]; then
     export OPENCODE_CONFIG_CONTENT=$(cat /sandbox/.config/opencode/opencode.jsonc)
 fi
 
-# RHOAI MLflow tracing
+# RHOAI MLflow tracing (external route, Bearer token auth)
 export MLFLOW_TRACKING_URI="$MLFLOW_TRACKING_URI"
 export MLFLOW_TRACKING_TOKEN="$OCP_TOKEN"
+export MLFLOW_TRACKING_INSECURE_TLS="true"
 export MLFLOW_EXPERIMENT_NAME="opencode-sandbox"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer ${OCP_TOKEN},X-Mlflow-Workspace=${MLFLOW_WORKSPACE}"
+export MLFLOW_WORKSPACE="$MLFLOW_WORKSPACE"
+export NODE_TLS_REJECT_UNAUTHORIZED="0"
 
 export npm_config_prefix=/sandbox/.npm-global
 export PATH="/sandbox/.npm-global/bin:$PATH"
@@ -168,6 +173,32 @@ fi
 PROFILE
 '
 
+step "Install MLflow tracing plugin"
+if [ -n "$OCP_TOKEN" ]; then
+    # Install @mlflow/opencode plugin (downloads from npm, then replace with pre-built version)
+    openshell sandbox exec --name "$SANDBOX_NAME" -- sh -c 'export npm_config_prefix=/sandbox/.npm-global && export PATH="/sandbox/.npm-global/bin:$PATH" && opencode plugin @mlflow/opencode 2>&1 || echo "Plugin install: non-fatal"'
+
+    # Replace cached plugin with pre-built version (includes workspace header fix)
+    openshell sandbox exec --name "$SANDBOX_NAME" -- sh -c '
+        CACHED_CORE=$(find /sandbox/.cache/opencode/packages -path "*/@mlflow/core/dist" -type d 2>/dev/null | head -1)
+        CACHED_OC=$(find /sandbox/.cache/opencode/packages -path "*/@mlflow/opencode/dist" -type d 2>/dev/null | head -1)
+        [ -d "/opt/mlflow-plugin/core/dist" ] && [ -n "${CACHED_CORE:-}" ] && cp -r /opt/mlflow-plugin/core/dist/* "$CACHED_CORE/" && echo "Replaced @mlflow/core"
+        [ -d "/opt/mlflow-plugin/opencode/dist" ] && [ -n "${CACHED_OC:-}" ] && cp -r /opt/mlflow-plugin/opencode/dist/* "$CACHED_OC/" && echo "Replaced @mlflow/opencode"
+    ' 2>&1 || true
+    info "MLflow tracing plugin installed"
+else
+    warn "MLflow plugin: SKIP (no OCP token)"
+fi
+
+step "Create MLflow experiment"
+if [ -n "$OCP_TOKEN" ]; then
+    # mlflow[kubernetes] handles auth natively (Bearer token + X-Mlflow-Workspace header)
+    openshell sandbox exec --name "$SANDBOX_NAME" -- sh -c "export MLFLOW_TRACKING_URI='${MLFLOW_SANDBOX_URI}' MLFLOW_TRACKING_TOKEN='${OCP_TOKEN}' MLFLOW_TRACKING_INSECURE_TLS=true MLFLOW_WORKSPACE='${MLFLOW_WORKSPACE:-openshell}' && /sandbox/.venv/bin/python3 -c 'import os, mlflow; mlflow.set_tracking_uri(os.environ[\"MLFLOW_TRACKING_URI\"]); name=\"opencode-sandbox\"; exp=mlflow.get_experiment_by_name(name); print(exp.experiment_id if exp else mlflow.create_experiment(name))' 2>&1 || echo 'MLflow setup: non-fatal'"
+    info "MLflow experiment opencode-sandbox created"
+else
+    warn "MLflow experiment: SKIP (no OCP token)"
+fi
+
 step "Test LiteLLM from sandbox"
 RESULT=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -s -w "\n%{http_code}" -X POST "${LITELLM_BASE_URL}/chat/completions" -H "Authorization: Bearer ${LITELLM_API_KEY}" -H "Content-Type: application/json" -d '{"model":"'"${LITELLM_MODEL:-gpt-oss-120b}"'","messages":[{"role":"user","content":"Say ok"}],"max_tokens":5}' 2>&1 | grep -v "Using sandbox")
 HTTP_CODE=$(echo "$RESULT" | tail -1)
@@ -179,7 +210,7 @@ fi
 
 step "Test RHOAI MLflow from sandbox"
 if [ -n "$OCP_TOKEN" ]; then
-    MLF_CODE=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -sk -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${OCP_TOKEN}" -H "X-Mlflow-Workspace: ${MLFLOW_WORKSPACE:-openshell}" "${MLFLOW_TRACKING_URI:-https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow}/api/2.0/mlflow/experiments/search?max_results=1" 2>&1 | grep -v "Using sandbox")
+    MLF_CODE=$(openshell sandbox exec --name "$SANDBOX_NAME" -- curl -sk -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${OCP_TOKEN}" -H "X-Mlflow-Workspace: ${MLFLOW_WORKSPACE:-openshell}" "${MLFLOW_SANDBOX_URI}/api/2.0/mlflow/experiments/search?max_results=1" 2>&1 | grep -v "Using sandbox")
     if [ "$MLF_CODE" = "200" ]; then
         info "RHOAI MLflow test: OK (HTTP 200)"
     else
@@ -201,5 +232,6 @@ echo " Inside the sandbox (credentials auto-loaded):"
 echo "   opencode"
 echo ""
 echo " Model: ${LITELLM_MODEL:-gpt-oss-120b}"
-echo " MLflow: ${MLFLOW_TRACKING_URI:-https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow}"
+echo " MLflow: ${MLFLOW_SANDBOX_URI}"
+echo " MLflow traces: automatic (@mlflow/opencode plugin, fires on session idle)"
 echo ""

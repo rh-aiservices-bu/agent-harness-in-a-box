@@ -103,3 +103,118 @@ grant_privileged_scc() {
     step "Grant privileged SCC to openshell-sandbox SA"
     oc adm policy add-scc-to-user privileged -z openshell-sandbox -n "$ns"
 }
+
+render_policy() {
+    local template="$1" output="$2" domain="$3"
+    if [ ! -f "$template" ]; then
+        error "Policy template not found: $template"
+        exit 1
+    fi
+    if [ -z "$domain" ]; then
+        error "OCP_APPS_DOMAIN required to render policy"
+        exit 1
+    fi
+    sed "s/__OCP_APPS_DOMAIN__/${domain}/g" "$template" > "$output"
+    info "Policy rendered from $(basename "$template") (domain: $domain)"
+}
+
+# --- Security test helpers ---
+
+_sandbox_exec() {
+    local sandbox="$1"; shift
+    openshell sandbox exec --name "$sandbox" -- "$@" 2>&1 | grep -v "Using sandbox"
+}
+
+test_curl() {
+    local label="$1" url="$2" sandbox="$3"
+    local raw code connect_code
+    raw=$(_sandbox_exec "$sandbox" curl -s -o /dev/null -w '%{http_code}:%{http_connect}' --max-time 10 "$url" | tail -1)
+    code="${raw%%:*}"
+    connect_code="${raw##*:}"
+    if [ "$code" = "200" ] || [ "$code" = "401" ] || [ "$code" = "301" ] || [ "$code" = "302" ]; then
+        printf "  ${GREEN}[ALLOWED]${NC} %-55s -> HTTP %s\n" "$label" "$code"
+        return 0
+    elif [ "$connect_code" = "403" ]; then
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> CONNECT 403 (proxy denied)\n" "$label"
+        return 1
+    else
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> HTTP %s\n" "$label" "${code:-ERR}"
+        return 1
+    fi
+}
+
+test_curl_method() {
+    local label="$1" method="$2" url="$3" sandbox="$4"
+    local code
+    code=$(_sandbox_exec "$sandbox" curl -s -o /dev/null -w '%{http_code}' --max-time 10 -X "$method" "$url" | tail -1)
+    if [ "$code" = "200" ] || [ "$code" = "401" ] || [ "$code" = "404" ] || [ "$code" = "422" ]; then
+        printf "  ${GREEN}[ALLOWED]${NC} %-55s -> HTTP %s\n" "$label" "$code"
+        return 0
+    else
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> HTTP %s\n" "$label" "${code:-ERR}"
+        return 1
+    fi
+}
+
+test_python_url() {
+    local label="$1" url="$2" sandbox="$3"
+    local result
+    result=$(_sandbox_exec "$sandbox" python3 -c "
+import urllib.request, ssl
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
+try:
+    r = urllib.request.urlopen('$url', timeout=10, context=ctx)
+    print(r.status)
+except Exception as e:
+    print('ERR: ' + str(e)[:60])
+" | tail -1)
+    if echo "$result" | grep -qE '^(200|301|302|401)$'; then
+        printf "  ${GREEN}[ALLOWED]${NC} %-55s -> HTTP %s\n" "$label" "$result"
+        return 0
+    else
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> %s\n" "$label" "${result:-ERR}"
+        return 1
+    fi
+}
+
+test_file_write() {
+    local label="$1" path="$2" sandbox="$3"
+    local result
+    result=$(_sandbox_exec "$sandbox" sh -c "touch ${path} 2>&1 && echo WRITE_OK || echo WRITE_FAIL" | tail -1)
+    if [ "$result" = "WRITE_OK" ]; then
+        printf "  ${GREEN}[ALLOWED]${NC} %-55s -> OK\n" "$label"
+        _sandbox_exec "$sandbox" rm -f "$path" >/dev/null 2>&1 || true
+        return 0
+    else
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> Permission denied\n" "$label"
+        return 1
+    fi
+}
+
+test_file_read() {
+    local label="$1" path="$2" sandbox="$3"
+    local result
+    result=$(_sandbox_exec "$sandbox" sh -c "cat ${path} > /dev/null 2>&1 && echo READ_OK || echo READ_FAIL" | tail -1)
+    if [ "$result" = "READ_OK" ]; then
+        printf "  ${GREEN}[ALLOWED]${NC} %-55s -> OK\n" "$label"
+        return 0
+    else
+        printf "  ${RED}[BLOCKED]${NC} %-55s -> Permission denied\n" "$label"
+        return 1
+    fi
+}
+
+test_process() {
+    local label="$1" cmd="$2" expect="$3" sandbox="$4"
+    local actual
+    actual=$(_sandbox_exec "$sandbox" sh -c "$cmd" | tail -1)
+    if [ "$actual" = "$expect" ]; then
+        printf "  ${GREEN}[VERIFY]${NC}  %-55s -> %s\n" "$label" "$actual"
+        return 0
+    else
+        printf "  ${YELLOW}[CHECK]${NC}  %-55s -> %s (expected: %s)\n" "$label" "$actual" "$expect"
+        return 1
+    fi
+}

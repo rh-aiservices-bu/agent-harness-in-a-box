@@ -158,6 +158,56 @@ The `setup-sandbox.sh` script configures this automatically when an OCP token is
 
 Access the RHOAI MLflow dashboard at `https://mlflow.redhat-ods-applications.svc.cluster.local:8443/mlflow` and navigate to the `openshell` workspace.
 
+## Sandbox Security: Permissive Policy
+
+This demo uses a **permissive** policy - the widest access tier for trusted development. Even at this level, OpenShell still enforces an allowlist. Unrecognized hosts are blocked.
+
+### Full Development Access
+
+The permissive tier allows direct AI APIs, GitHub with full write access, and all package registries:
+
+```bash
+# From inside the sandbox:
+curl https://api.github.com/repos/NVIDIA/OpenShell     # -> HTTP 200 (GET)
+curl -X POST https://api.github.com/repos/.../issues   # -> HTTP 200 (POST allowed!)
+curl https://api.anthropic.com/v1/models                # -> HTTP 200 (direct AI API)
+curl https://example.com                                # -> HTTP 403 (still blocked!)
+```
+
+### Hot-Reload: Switch Policies Without Restart
+
+Network policies are dynamic - they hot-reload via the CONNECT proxy without restarting the sandbox. The test script demonstrates switching from permissive to strict and back:
+
+```bash
+# Apply strict - everything locks down instantly
+openshell policy set --global --policy ../01-basic-openshell/config/policy-strict.yaml --yes
+curl https://api.github.com     # -> HTTP 403 (was 200 seconds ago!)
+
+# Restore permissive - access returns
+openshell policy set --global --policy /tmp/policy-permissive-rendered.yaml --yes
+curl https://api.github.com     # -> HTTP 200 (back to normal)
+```
+
+### Security Tiers Comparison
+
+| Feature | Strict (Demo 01) | Standard (Demo 02) | Permissive (Demo 03) |
+|---------|-------------------|---------------------|----------------------|
+| Inference (LiteLLM) | Agent binaries only | All binaries | All binaries |
+| Package registries | Blocked | Allowed | Allowed |
+| GitHub | Blocked | Read-only | Full access |
+| Direct AI APIs | Blocked | Blocked | Allowed |
+| Filesystem (Landlock) | Identical across all tiers | | |
+| Process isolation | Identical across all tiers | | |
+
+### Run the Full Security Test
+
+```bash
+bash setup-sandbox.sh              # create sandbox with permissive policy
+bash test-sandbox-security.sh      # run all tests including hot-reload demo
+```
+
+This runs network access, hot-reload switching, Landlock, and process isolation tests.
+
 ## Environment Variables Reference
 
 | Variable | Purpose | Example |
@@ -190,7 +240,7 @@ The CONNECT proxy may reset connections for large npm packages. Use the manual b
 
 **API returns 403 from sandbox:**
 
-The network policy doesn't allow the endpoint. Check that `config/policy.yaml` includes your LiteLLM hostname and re-apply with `openshell policy set --global`.
+The network policy doesn't allow the endpoint. Check that `config/policy-permissive.yaml.template` includes your LiteLLM hostname and re-apply with `openshell policy set --global`.
 
 **"Incorrect API key" errors:**
 

@@ -1,0 +1,57 @@
+# Strict sandbox policy - inference only.
+# Zero external egress. The agent can reach the LiteLLM inference proxy
+# and nothing else. Binary binding restricts access to python3 and node
+# only - even curl to allowed endpoints is blocked.
+#
+# Use case: untrusted prompts, compliance-sensitive, air-gapped environments.
+#
+# Apply:  openshell policy set [--wait] <sandbox-name> --policy config/policy-strict.yaml
+# Test:   bash test-sandbox-security.sh <sandbox-name>
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /bin
+    - /sbin
+    - /proc
+    - /dev/urandom
+    - /etc
+  read_write:
+    - /sandbox
+    - /workspace
+    - /tmp
+    - /dev/null
+    - /dev/zero
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+
+  litellm_inference:
+    name: "LiteLLM Inference Proxy"
+    endpoints:
+      - host: "maas-rhdp.apps.maas.redhatworkshops.io"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+      - host: "*.redhatworkshops.io"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3.12 }
+      - { path: "/sandbox/.uv/python/**" }
+      - { path: /usr/bin/node }

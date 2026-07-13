@@ -38,17 +38,27 @@ fi
 # Sandbox-accessible MLflow URI (external route, not internal svc)
 MLFLOW_SANDBOX_URI="https://mlflow-redhat-ods-applications.${OCP_APPS_DOMAIN}"
 
-step "Apply global network policy"
-openshell policy set --global --policy "$SCRIPT_DIR/config/policy.yaml" --yes
+step "Render network policy (tier: ${POLICY_TIER:-permissive})"
+POLICY_TIER="${POLICY_TIER:-permissive}"
+POLICY_TEMPLATE="$SCRIPT_DIR/config/policy-${POLICY_TIER}.yaml.template"
+if [ ! -f "$POLICY_TEMPLATE" ] && [ -f "$SCRIPT_DIR/config/policy-${POLICY_TIER}.yaml" ]; then
+    POLICY_TEMPLATE="$SCRIPT_DIR/config/policy-${POLICY_TIER}.yaml"
+fi
+RENDERED_POLICY="/tmp/policy-${POLICY_TIER}-rendered.yaml"
+if [[ "$POLICY_TEMPLATE" == *.template ]]; then
+    render_policy "$POLICY_TEMPLATE" "$RENDERED_POLICY" "$OCP_APPS_DOMAIN"
+else
+    cp "$POLICY_TEMPLATE" "$RENDERED_POLICY"
+fi
 
 step "Create sandbox: $SANDBOX_NAME"
 openshell sandbox delete "$SANDBOX_NAME" 2>/dev/null || true
 sleep 3
 if [ -n "${SANDBOX_IMAGE:-}" ]; then
     info "Using pre-baked image: $SANDBOX_IMAGE"
-    openshell sandbox create --name "$SANDBOX_NAME" --from "$SANDBOX_IMAGE"
+    openshell sandbox create --name "$SANDBOX_NAME" --from "$SANDBOX_IMAGE" --policy "$RENDERED_POLICY"
 else
-    openshell sandbox create --name "$SANDBOX_NAME"
+    openshell sandbox create --name "$SANDBOX_NAME" --policy "$RENDERED_POLICY"
 fi
 
 step "Wait for sandbox to be ready"
@@ -64,6 +74,9 @@ for i in $(seq 1 30); do
     fi
     sleep 5
 done
+
+step "Apply network policy (tier: $POLICY_TIER)"
+openshell policy set --policy "$RENDERED_POLICY" --wait "$SANDBOX_NAME"
 
 if [ -z "${SANDBOX_IMAGE:-}" ]; then
     step "Install Claude Code in sandbox"

@@ -253,6 +253,62 @@ openshell sandbox create --name auto-test --no-keep -- bash -c 'echo "Task done"
 
 The `--no-keep` flag automatically deletes the sandbox after the command exits.
 
+## Sandbox Security: Strict Policy
+
+This demo uses a **strict** policy that locks the sandbox to inference-only access. OpenShell enforces four layers of isolation inside every sandbox pod.
+
+### Network: Default-Deny via CONNECT Proxy
+
+Every outbound connection goes through OpenShell's HTTP CONNECT proxy. Only endpoints explicitly listed in the policy are reachable - everything else returns HTTP 403.
+
+```bash
+# Apply the strict policy
+openshell policy set --global --policy config/policy-strict.yaml --yes
+
+# From inside the sandbox:
+curl https://github.com          # -> HTTP 403 (not in policy)
+curl https://google.com          # -> HTTP 403 (not in policy)
+```
+
+### Network: Binary Binding
+
+The strict policy restricts which executables can reach the inference endpoint. Only `python3` and `node` are allowed - `curl` is blocked even for allowed hosts:
+
+```bash
+curl $LITELLM_URL/health                                              # -> HTTP 403 (curl not in binaries)
+python3 -c "import urllib.request; print(urllib.request.urlopen(...).status)"  # -> HTTP 200 (python3 IS allowed)
+```
+
+### Filesystem: Landlock Enforcement
+
+Landlock (Linux Security Module) restricts filesystem access at the kernel level. Paths must be explicitly declared as read-only or read-write in the policy:
+
+```bash
+echo test > /workspace/test.txt    # OK (read-write path)
+echo test > /tmp/test.txt          # OK (read-write path)
+echo test > /etc/test.txt          # Permission denied (read-only)
+echo test > /var/data.txt          # Permission denied (not in policy)
+cat /etc/os-release                # OK (read-only allows reads)
+```
+
+### Process Isolation
+
+The agent process runs as the unprivileged `sandbox` user, not root:
+
+```bash
+whoami   # -> sandbox
+id       # -> uid=sandbox gid=sandbox
+```
+
+### Run the Full Security Test
+
+```bash
+bash setup-sandbox.sh              # create sandbox with strict policy
+bash test-sandbox-security.sh      # run all tests, see color-coded report
+```
+
+This runs all network, filesystem, and process tests and prints a summary showing what OpenShell blocks at this tier.
+
 ## Teardown
 
 Remove everything installed by this demo:

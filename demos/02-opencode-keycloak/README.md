@@ -314,7 +314,7 @@ openshell provider create openai \
 openshell inference set --provider litellm --model gpt-oss-120b --role user
 openshell inference set --provider litellm --model llama-scout-17b --role system
 
-openshell policy set --global --policy config/policy.yaml --yes
+openshell policy set --global --policy /tmp/policy-standard-rendered.yaml --yes
 ```
 
 ### Step 11: Configure RHOAI MLflow tracing (optional)
@@ -322,6 +322,67 @@ openshell policy set --global --policy config/policy.yaml --yes
 `setup-sandbox.sh` configures MLflow automatically when an OCP token is available. For manual setup, see `overlays/mlflow/README.md`.
 
 Access the RHOAI MLflow dashboard at the route exposed by OpenShift AI and navigate to the `openshell` workspace.
+
+## Sandbox Security: Standard Policy
+
+This demo uses a **standard** policy - a balanced tier for coding agents that allows inference, package registries, and read-only GitHub access while blocking direct AI APIs and arbitrary web browsing.
+
+### Network Allowlisting
+
+Unlike the strict policy (Demo 01), the standard tier opens access to package registries and code hosts that coding agents need:
+
+```bash
+# From inside the sandbox:
+curl https://registry.npmjs.org/express    # -> HTTP 200 (npm allowed)
+curl https://pypi.org/simple/requests/     # -> HTTP 200 (PyPI allowed)
+curl https://api.anthropic.com             # -> HTTP 403 (direct AI APIs not needed)
+curl https://example.com                   # -> HTTP 403 (not in policy)
+```
+
+### L7 Inspection: Read-Only Enforcement
+
+GitHub is allowed but restricted to read-only access. The CONNECT proxy terminates TLS and inspects each HTTP request at Layer 7:
+
+```bash
+curl https://api.github.com/repos/NVIDIA/OpenShell    # -> HTTP 200 (GET allowed)
+curl -X POST https://api.github.com/repos/.../issues  # -> HTTP 403 (POST blocked!)
+```
+
+The proxy returns a structured JSON error for blocked methods:
+
+```json
+{"error": "policy_denied", "detail": "POST not permitted by read-only policy"}
+```
+
+### Filesystem: Landlock Enforcement
+
+Same Landlock rules as the strict tier - filesystem access is identical across all policy levels:
+
+```bash
+echo test > /workspace/test.txt    # OK (read-write path)
+echo test > /tmp/test.txt          # OK (read-write path)
+echo test > /etc/test.txt          # Permission denied (read-only)
+echo test > /usr/test.txt          # Permission denied (read-only)
+cat /etc/os-release                # OK (read-only allows reads)
+```
+
+### Comparing Tiers
+
+Switch to strict to see the contrast (hot-reload, no restart needed):
+
+```bash
+openshell policy set --global --policy ../01-basic-openshell/config/policy-strict.yaml --yes
+curl https://registry.npmjs.org/express    # -> HTTP 403 (was 200!)
+```
+
+### Run the Full Security Test
+
+```bash
+bash setup-sandbox.sh              # create sandbox with standard policy
+bash test-sandbox-security.sh      # run all tests, see color-coded report
+```
+
+This runs network allowlisting, L7 inspection, Landlock, and process isolation tests.
 
 ## Teardown
 

@@ -32,3 +32,6 @@ node_modules/
 # Temporary
 *.log
 *.tmp
+
+# Agent instructions (private per-developer)
+CLAUDE.md

@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ctf-ui
+  labels:
+    app: ctf-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ctf-ui
+  template:
+    metadata:
+      labels:
+        app: ctf-ui
+    spec:
+      containers:
+        - name: ctf-ui
+          image: ${CTF_UI_IMAGE}
+          ports:
+            - containerPort: 8000
+              name: http
+          env:
+            - name: SANDBOX_NAME
+              value: "ctf-sandbox"
+            - name: OPENSHELL_GATEWAY_ENDPOINT
+              value: "http://openshell.${NAMESPACE}.svc.cluster.local:8080"
+            - name: NAMESPACE
+              value: "${NAMESPACE}"
+            - name: POLICY_DIR
+              value: "/policies"
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: policies
+          configMap:
+            name: ctf-policies
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ctf-ui
+  labels:
+    app: ctf-ui
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8000
+      targetPort: http
+      name: http
+  selector:
+    app: ctf-ui
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: ctf-ui
+spec:
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  to:
+    kind: Service
+    name: ctf-ui

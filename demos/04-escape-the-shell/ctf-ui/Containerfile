@@ -1,0 +1,30 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ca-certificates procps iproute2 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://raw.githubusercontent.com/nvidia/openshell/main/install.sh | sh && \
+    mv /root/.openshell/bin/openshell /usr/local/bin/openshell || \
+    mv /root/bin/openshell /usr/local/bin/openshell || true
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app.py index.html ./
+
+RUN chmod -R g+rw /app && \
+    mkdir -p /.openshell && chmod -R g+rw /.openshell && \
+    mkdir -p /policies && chmod -R g+rw /policies
+
+ENV HOME=/app
+ENV PATH="/usr/local/bin:${PATH}"
+
+EXPOSE 8000
+
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]

@@ -88,7 +88,7 @@ create_jwt_secret() {
 install_agent_sandbox_crd() {
     step "Install Agent Sandbox CRD and controller"
     oc apply -f \
-        https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/manifest.yaml
+        https://github.com/kubernetes-sigs/agent-sandbox/releases/latest/download/sandbox.yaml
     wait_for_pod_ready "agent-sandbox-system" "control-plane=controller-manager" 120
 }
 

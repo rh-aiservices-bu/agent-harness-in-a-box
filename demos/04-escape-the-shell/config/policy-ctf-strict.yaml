@@ -1,0 +1,69 @@
+# CTF strict sandbox policy - demonstrates all OpenShell security layers.
+#
+# Network:    Default-deny + binary binding + L7 read-only
+# Filesystem: Landlock restricts to declared paths
+# Process:    Runs as unprivileged sandbox user
+#
+# Apply:  openshell policy set [--wait] <sandbox-name> --policy config/policy-ctf-strict.yaml
+# Test:   bash test-sandbox-security.sh <sandbox-name>
+
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /lib
+    - /lib64
+    - /bin
+    - /sbin
+    - /proc
+    - /dev/urandom
+    - /etc
+  read_write:
+    - /sandbox
+    - /workspace
+    - /tmp
+    - /dev/null
+    - /dev/zero
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+
+  litellm_inference:
+    name: "LiteLLM Inference (python3/node only)"
+    endpoints:
+      - host: "maas-rhdp.apps.maas.redhatworkshops.io"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+      - host: "*.redhatworkshops.io"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3.12 }
+      - { path: "/sandbox/.uv/python/**" }
+      - { path: /usr/bin/node }
+
+  github_api:
+    name: "GitHub API (read-only, curl+python3)"
+    endpoints:
+      - host: "api.github.com"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: read-only
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3.12 }

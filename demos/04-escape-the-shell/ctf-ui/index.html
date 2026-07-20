@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escape the Shell - OpenShell CTF</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-deep: #0a0a12;
+  --bg-surface: #12121e;
+  --bg-elevated: #1a1a2a;
+  --bg-panel: #0e0e1a;
+  --border: #2a2a40;
+  --border-active: #5b7af8;
+  --text-primary: #e8e8f0;
+  --text-secondary: #9090a8;
+  --text-muted: #606078;
+  --accent: #5b7af8;
+  --accent-glow: rgba(91, 122, 248, 0.15);
+  --green: #34d399;
+  --green-dim: rgba(52, 211, 153, 0.12);
+  --green-glow: rgba(52, 211, 153, 0.08);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.12);
+  --red: #f87171;
+  --red-dim: rgba(248, 113, 113, 0.12);
+  --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.10);
+  --purple: #a78bfa;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --mono: 'JetBrains Mono', monospace;
+  --sans: 'DM Sans', system-ui, sans-serif;
+}
+
+html { font-size: 14px; }
+body {
+  font-family: var(--sans);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 30% -10%, rgba(91, 122, 248, 0.06), transparent),
+    radial-gradient(ellipse 60% 40% at 80% 110%, rgba(52, 211, 153, 0.04), transparent);
+  pointer-events: none; z-index: 0;
+}
+
+.app { position: relative; z-index: 1; max-width: 1200px; margin: 0 auto; padding: 1.5rem 1.5rem 4rem; }
+
+/* Header */
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 1.5rem; padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.header-left { display: flex; align-items: baseline; gap: 0.75rem; }
+.header-left h1 {
+  font-family: var(--mono); font-size: 1.3rem; font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.header-left h1 .prompt { color: var(--green); }
+.header-left h1 .title { color: var(--text-primary); }
+.header-left .tag {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--cyan);
+  background: var(--cyan-dim); padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm); border: 1px solid rgba(34,211,238,0.2);
+}
+.flag-counter {
+  font-family: var(--mono); font-size: 1rem; font-weight: 600;
+  color: var(--green); display: flex; align-items: center; gap: 0.4rem;
+}
+.flag-counter .num { font-size: 1.4rem; }
+
+/* Security layers */
+.layers-bar {
+  display: flex; gap: 0; margin-bottom: 1.25rem;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  overflow: hidden; font-family: var(--mono); font-size: 0.72rem;
+}
+.layer {
+  flex: 1; padding: 0.6rem 0.75rem; text-align: center;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0.2rem;
+}
+.layer:last-child { border-right: none; }
+.layer-name { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.layer-k8s { background: var(--red-dim); }
+.layer-k8s .layer-name { color: var(--red); }
+.layer-ocp { background: var(--amber-dim); }
+.layer-ocp .layer-name { color: var(--amber); }
+.layer-openshell { background: var(--green-dim); }
+.layer-openshell .layer-name { color: var(--green); }
+.layer-detail { color: var(--text-muted); font-size: 0.65rem; }
+.layer-arrow {
+  display: flex; align-items: center; padding: 0 0.2rem;
+  color: var(--text-muted); font-size: 0.9rem; background: var(--bg-surface);
+}
+
+/* Progress bar */
+.progress-section { margin-bottom: 1.25rem; }
+.progress-bar-track {
+  height: 6px; background: var(--bg-elevated); border-radius: 3px;
+  overflow: hidden; margin-bottom: 0.75rem;
+}
+.progress-bar-fill {
+  height: 100%; background: linear-gradient(90deg, var(--green), var(--cyan));
+  border-radius: 3px; transition: width 0.5s ease;
+}
+
+/* Challenge tabs */
+.challenge-tabs {
+  display: flex; gap: 0.5rem; flex-wrap: wrap;
+}
+.challenge-tab {
+  font-family: var(--mono); font-size: 0.75rem; font-weight: 500;
+  padding: 0.5rem 0.9rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.15s; display: flex; align-items: center; gap: 0.4rem;
+  white-space: nowrap;
+}
+.challenge-tab:hover { border-color: var(--accent); color: var(--text-primary); }
+.challenge-tab.active {
+  border-color: var(--accent); background: var(--accent-glow);
+  color: var(--accent); font-weight: 600;
+}
+.challenge-tab.captured {
+  border-color: rgba(52,211,153,0.4); background: var(--green-dim);
+  color: var(--green);
+}
+.challenge-tab.active.captured {
+  border-color: var(--green); background: rgba(52,211,153,0.18);
+  box-shadow: 0 0 0 1px var(--green); font-weight: 700;
+}
+.tab-check { font-size: 0.85rem; }
+
+/* Challenge content */
+.challenge-card {
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-top: 1.25rem; overflow: hidden;
+}
+.challenge-header {
+  padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
+}
+.challenge-title-row {
+  display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.5rem;
+}
+.challenge-number {
+  font-family: var(--mono); font-size: 0.7rem; font-weight: 700;
+  color: var(--accent); background: var(--accent-glow);
+  padding: 0.15rem 0.45rem; border-radius: var(--radius-sm);
+}
+.challenge-title {
+  font-family: var(--mono); font-size: 1.1rem; font-weight: 600;
+  color: var(--text-primary);
+}
+.challenge-subtitle {
+  font-family: var(--mono); font-size: 0.75rem; color: var(--text-muted);
+  margin-left: 0.3rem;
+}
+.challenge-narrative {
+  font-size: 0.9rem; color: var(--text-secondary); line-height: 1.65;
+  max-width: 80ch;
+}
+.challenge-concept {
+  font-family: var(--mono); font-size: 0.78rem; color: var(--text-muted);
+  margin-top: 0.6rem; padding: 0.6rem 0.8rem;
+  background: var(--bg-panel); border-radius: var(--radius-sm);
+  border-left: 2px solid var(--accent);
+}
+
+/* Presets */
+.presets {
+  padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+}
+.presets-label {
+  font-family: var(--mono); font-size: 0.7rem; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em;
+  margin-right: 0.25rem;
+}
+.preset-pill {
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 500;
+  padding: 0.3rem 0.65rem; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--bg-elevated);
+  color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+}
+.preset-pill:hover {
+  border-color: var(--accent); color: var(--accent); background: var(--accent-glow);
+}
+
+/* Split panels */
+.panels {
+  display: grid; grid-template-columns: 1fr 1fr;
+  border-top: none;
+}
+.panel {
+  padding: 1rem 1.25rem; min-height: 300px;
+  display: flex; flex-direction: column;
+}
+.panel:first-child { border-right: 1px solid var(--border); }
+.panel-label {
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.4rem;
+}
+.panel-unprotected .panel-label { color: var(--amber); }
+.panel-protected .panel-label { color: var(--green); }
+.panel-tag {
+  font-weight: 400; font-size: 0.65rem; color: var(--text-muted);
+  text-transform: none; letter-spacing: 0;
+}
+
+/* Command input */
+.cmd-input-row {
+  display: flex; gap: 0.4rem; margin-bottom: 0.75rem;
+}
+.cmd-prompt {
+  font-family: var(--mono); font-size: 0.85rem; font-weight: 600;
+  color: var(--text-muted); line-height: 2.1; flex-shrink: 0;
+}
+.cmd-input {
+  font-family: var(--mono); font-size: 0.82rem;
+  background: var(--bg-panel); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0.45rem 0.65rem; flex: 1; outline: none;
+  transition: border-color 0.2s;
+}
+.cmd-input:focus { border-color: var(--accent); }
+.cmd-input::placeholder { color: var(--text-muted); }
+.btn-run {
+  font-family: var(--mono); font-size: 0.75rem; font-weight: 600;
+  padding: 0.45rem 0.85rem; border: none; border-radius: var(--radius-sm);
+  background: var(--accent); color: #fff; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn-run:hover { background: #6b88f9; }
+.btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Command history */
+.cmd-history {
+  flex: 1; overflow-y: auto; max-height: 350px;
+  font-family: var(--mono); font-size: 0.78rem;
+}
+.cmd-entry { margin-bottom: 0.6rem; }
+.cmd-line {
+  color: var(--text-muted); margin-bottom: 0.15rem;
+  display: flex; align-items: center; gap: 0.3rem;
+}
+.cmd-line .arrow { color: var(--accent); }
+.cmd-output {
+  padding: 0.35rem 0.6rem; border-radius: var(--radius-sm);
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem;
+}
+.cmd-output-text {
+  white-space: pre-wrap; word-break: break-all; flex: 1;
+}
+.cmd-output.risk {
+  background: var(--amber-dim); color: var(--amber);
+  border-left: 2px solid var(--amber);
+}
+.cmd-output.secure {
+  background: var(--green-dim); color: var(--green);
+  border-left: 2px solid var(--green);
+}
+.cmd-output.error {
+  background: var(--red-dim); color: var(--red);
+  border-left: 2px solid var(--red);
+}
+.cmd-output.neutral {
+  background: rgba(255,255,255,0.03); color: var(--text-secondary);
+  border-left: 2px solid var(--border);
+}
+.cmd-badge {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.06em; white-space: nowrap; padding: 0.1rem 0.4rem;
+  border-radius: 2px; flex-shrink: 0;
+}
+.badge-risk { background: rgba(251,191,36,0.2); color: var(--amber); }
+.badge-secure { background: rgba(52,211,153,0.2); color: var(--green); }
+.badge-error { background: rgba(248,113,113,0.2); color: var(--red); }
+.badge-allowed { background: rgba(52,211,153,0.15); color: var(--green); }
+
+/* Duration */
+.cmd-duration {
+  font-size: 0.6rem; color: var(--text-muted); margin-top: 0.1rem;
+}
+
+/* Flag banner */
+.flag-banner {
+  margin-top: 1rem; padding: 0.8rem 1.25rem;
+  background: var(--green-dim); border: 1px solid rgba(52,211,153,0.3);
+  border-radius: var(--radius); text-align: center;
+  font-family: var(--mono); animation: flag-appear 0.4s ease;
+}
+.flag-banner .flag-icon { font-size: 1.2rem; margin-right: 0.5rem; }
+.flag-banner .flag-name {
+  font-weight: 700; color: var(--green); font-size: 0.9rem;
+}
+.flag-banner .flag-text {
+  color: var(--text-secondary); font-size: 0.8rem;
+}
+@keyframes flag-appear {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+/* Policy controls */
+.policy-controls {
+  padding: 0.75rem 1.5rem; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0.75rem;
+}
+.policy-label {
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.policy-status {
+  font-family: var(--mono); font-size: 0.75rem; font-weight: 600;
+  padding: 0.25rem 0.6rem; border-radius: var(--radius-sm);
+}
+.policy-strict { background: var(--red-dim); color: var(--red); }
+.policy-permissive { background: var(--green-dim); color: var(--green); }
+.btn-policy {
+  font-family: var(--mono); font-size: 0.72rem; font-weight: 600;
+  padding: 0.4rem 0.8rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-policy-permissive {
+  background: var(--green-dim); color: var(--green);
+  border-color: rgba(52,211,153,0.3);
+}
+.btn-policy-permissive:hover { background: rgba(52,211,153,0.2); }
+.btn-policy-strict {
+  background: var(--red-dim); color: var(--red);
+  border-color: rgba(248,113,113,0.3);
+}
+.btn-policy-strict:hover { background: rgba(248,113,113,0.2); }
+.btn-policy:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 1.5rem; right: 1.5rem;
+  font-family: var(--mono); font-size: 0.82rem;
+  padding: 0.75rem 1.2rem; border-radius: var(--radius);
+  z-index: 100; animation: toast-in 0.3s ease;
+  max-width: 400px;
+}
+.toast-flag {
+  background: var(--green-dim); color: var(--green);
+  border: 1px solid rgba(52,211,153,0.3);
+}
+.toast-info {
+  background: var(--accent-glow); color: var(--accent);
+  border: 1px solid rgba(91,122,248,0.3);
+}
+.toast-err {
+  background: var(--red-dim); color: var(--red);
+  border: 1px solid rgba(248,113,113,0.3);
+}
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+
+/* Loading */
+.spinner-inline {
+  display: inline-block; width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,0.2); border-top-color: currentColor;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .panels { grid-template-columns: 1fr; }
+  .panel:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  .layers-bar { flex-direction: column; }
+  .layer-arrow { justify-content: center; padding: 0.2rem; }
+  .challenge-tabs { overflow-x: auto; flex-wrap: nowrap; }
+}
+
+/* Scanline effect */
+.app::after {
+  content: '';
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg, transparent, transparent 2px,
+    rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none; z-index: 999;
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="header-left">
+      <h1><span class="prompt">&gt;</span> <span class="title">escape_the_shell</span></h1>
+      <span class="tag">OpenShell CTF</span>
+    </div>
+    <div class="flag-counter">
+      <span id="flagIcon">&#9873;</span>
+      <span><span class="num" id="flagCount">0</span>/<span id="flagTotal">5</span></span>
+    </div>
+  </header>
+
+  <!-- Security Layers Comparison -->
+  <div class="layers-bar">
+    <div class="layer layer-k8s">
+      <span class="layer-name">Kubernetes</span>
+      <span class="layer-detail">root user, full network, full filesystem</span>
+    </div>
+    <div class="layer-arrow">&rarr;</div>
+    <div class="layer layer-ocp">
+      <span class="layer-name">OpenShift</span>
+      <span class="layer-detail">non-root (SCC), full network, writable overlay</span>
+    </div>
+    <div class="layer-arrow">&rarr;</div>
+    <div class="layer layer-openshell">
+      <span class="layer-name">OpenShell</span>
+      <span class="layer-detail">+CONNECT proxy +Landlock +L7 +binary binding</span>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-section">
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" id="progressFill" style="width: 0%"></div>
+    </div>
+    <div class="challenge-tabs" id="challengeTabs"></div>
+  </div>
+
+  <!-- Challenge content rendered by JS -->
+  <div id="challengeContent"></div>
+</div>
+
+<script>
+(function() {
+  const API = '';
+  let challenges = [];
+  let activeChallenge = 0;
+  let flagState = {};
+  let cmdHistory = { unprotected: {}, protected: {} };
+  let currentPolicy = 'strict';
+  let presetCommands = { unprotected: null, protected: null };
+
+  async function loadChallenges() {
+    try {
+      const res = await fetch(API + '/api/challenges');
+      const data = await res.json();
+      challenges = data.challenges;
+    } catch(e) {
+      challenges = [];
+    }
+    await loadFlags();
+    renderTabs();
+    renderChallenge();
+  }
+
+  async function loadFlags() {
+    try {
+      const res = await fetch(API + '/api/flags');
+      const data = await res.json();
+      flagState = data.flags;
+      currentPolicy = data.current_policy || 'strict';
+      updateFlagCounter(data.captured, data.total);
+    } catch(e) {}
+  }
+
+  function updateFlagCounter(captured, total) {
+    const el = document.getElementById('flagCount');
+    if (el) el.textContent = captured;
+    const totalEl = document.getElementById('flagTotal');
+    if (totalEl) totalEl.textContent = total;
+    const fill = document.getElementById('progressFill');
+    if (fill && total > 0) fill.style.width = (captured / total * 100) + '%';
+  }
+
+  function renderTabs() {
+    const container = document.getElementById('challengeTabs');
+    container.innerHTML = challenges.map((c, i) => {
+      const captured = flagState[c.flag];
+      const active = i === activeChallenge;
+      let cls = 'challenge-tab';
+      if (active) cls += ' active';
+      if (captured) cls += ' captured';
+      return '<button class="' + cls + '" onclick="window._selectChallenge(' + i + ')">' +
+        (captured ? '<span class="tab-check">&#10003;</span>' : '') +
+        '<span>' + c.id + '. ' + c.title + '</span></button>';
+    }).join('');
+  }
+
+  function renderChallenge() {
+    const c = challenges[activeChallenge];
+    if (!c) return;
+    const captured = flagState[c.flag];
+
+    let html = '<div class="challenge-card">';
+
+    // Header
+    html += '<div class="challenge-header">';
+    html += '<div class="challenge-title-row">';
+    html += '<span class="challenge-number">0' + c.id + '</span>';
+    html += '<span class="challenge-title">' + c.title + '</span>';
+    html += '<span class="challenge-subtitle">' + c.subtitle + '</span>';
+    html += '</div>';
+    html += '<p class="challenge-narrative">' + c.narrative + '</p>';
+    html += '<div class="challenge-concept">' + c.concept + '</div>';
+    html += '</div>';
+
+    // Policy controls (Challenge 5 only)
+    if (c.has_policy_controls) {
+      const statusCls = currentPolicy === 'strict' ? 'policy-strict' : 'policy-permissive';
+      html += '<div class="policy-controls">';
+      html += '<span class="policy-label">Active Policy:</span>';
+      html += '<span class="policy-status ' + statusCls + '">' + currentPolicy + '</span>';
+      if (currentPolicy === 'strict') {
+        html += '<button class="btn-policy btn-policy-permissive" id="btnPolicyPermissive" onclick="window._switchPolicy(\'permissive\')">Apply Permissive Policy</button>';
+      } else {
+        html += '<button class="btn-policy btn-policy-strict" id="btnPolicyStrict" onclick="window._switchPolicy(\'strict\')">Restore Strict Policy</button>';
+      }
+      html += '</div>';
+    }
+
+    // Presets
+    html += '<div class="presets">';
+    html += '<span class="presets-label">Try:</span>';
+    c.presets.forEach(function(p, pi) {
+      html += '<button class="preset-pill" onclick="window._fillPreset(' +
+        activeChallenge + ',' + pi + ')">' + p.label + '</button>';
+    });
+    html += '</div>';
+
+    // Split panels
+    html += '<div class="panels">';
+    html += renderPanel('unprotected', c);
+    html += renderPanel('protected', c);
+    html += '</div>';
+
+    // Flag banner
+    if (captured) {
+      html += '<div class="flag-banner">';
+      html += '<span class="flag-icon">&#9873;</span>';
+      html += '<span class="flag-name">' + c.flag + '</span>';
+      html += ' <span class="flag-text">- CAPTURED</span>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+    document.getElementById('challengeContent').innerHTML = html;
+  }
+
+  function renderPanel(env, challenge) {
+    const isProtected = env === 'protected';
+    const panelCls = isProtected ? 'panel-protected' : 'panel-unprotected';
+    const label = isProtected ? 'PROTECTED' : 'UNPROTECTED';
+    const tag = isProtected ? '(OpenShell sandbox)' : '(OpenShift pod)';
+
+    let html = '<div class="panel ' + panelCls + '">';
+    html += '<div class="panel-label">' + label + ' <span class="panel-tag">' + tag + '</span></div>';
+
+    // Input
+    html += '<div class="cmd-input-row">';
+    html += '<span class="cmd-prompt">$</span>';
+    html += '<input type="text" class="cmd-input" id="input-' + env + '" ' +
+      'placeholder="Type a command..." ' +
+      'oninput="window._clearPreset(\'' + env + '\')" ' +
+      'onkeydown="if(event.key===\'Enter\')window._runCmd(\'' + env + '\')">';
+    html += '<button class="btn-run" id="btn-' + env + '" onclick="window._runCmd(\'' + env + '\')">RUN</button>';
+    html += '</div>';
+
+    // History
+    html += '<div class="cmd-history" id="history-' + env + '">';
+    const key = challenge.id;
+    const entries = (cmdHistory[env] && cmdHistory[env][key]) || [];
+    entries.forEach(function(entry) {
+      html += renderEntry(entry, isProtected);
+    });
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+  }
+
+  function renderEntry(entry, isProtected) {
+    let html = '<div class="cmd-entry">';
+    html += '<div class="cmd-line"><span class="arrow">&rsaquo;</span> ' + escapeHtml(entry.command) + '</div>';
+
+    const output = entry.stdout || entry.stderr || '(no output)';
+    let outputCls, badgeHtml;
+
+    if (entry.exit_code !== 0 || isBlocked(entry)) {
+      if (isProtected) {
+        outputCls = 'secure';
+        badgeHtml = '<span class="cmd-badge badge-secure">SECURE</span>';
+      } else {
+        outputCls = 'error';
+        badgeHtml = '<span class="cmd-badge badge-error">ERROR</span>';
+      }
+    } else {
+      if (isProtected) {
+        outputCls = 'neutral';
+        badgeHtml = '<span class="cmd-badge badge-allowed">ALLOWED</span>';
+      } else {
+        outputCls = 'risk';
+        badgeHtml = '<span class="cmd-badge badge-risk">RISK</span>';
+      }
+    }
+
+    html += '<div class="cmd-output ' + outputCls + '">';
+    html += '<span class="cmd-output-text">' + escapeHtml(output) + '</span>';
+    html += badgeHtml;
+    html += '</div>';
+    if (entry.duration_ms) {
+      html += '<div class="cmd-duration">' + entry.duration_ms + 'ms</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function isBlocked(entry) {
+    const out = (entry.stdout + ' ' + entry.stderr).toLowerCase();
+    return out.includes('403') ||
+           out.includes('blocked') ||
+           out.includes('denied') ||
+           out.includes('write_fail') ||
+           out.includes('permission denied') ||
+           out.includes('operation not permitted') ||
+           out.includes('connect 403') ||
+           out.includes('policy_denied') ||
+           entry.stdout.trim() === '000' ||
+           (entry.exit_code !== 0 && !out.includes('200') && !out.includes('301') && !out.includes('401'));
+  }
+
+  function isAllowed(entry) {
+    const out = (entry.stdout + ' ' + entry.stderr).toLowerCase();
+    return (out.includes('200') || out.includes('301') || out.includes('302') ||
+            out.includes('401') || out.includes('404') || out.includes('write_ok')) &&
+           !isBlocked(entry);
+  }
+
+  async function runCmd(env) {
+    const input = document.getElementById('input-' + env);
+    const btn = document.getElementById('btn-' + env);
+    const command = presetCommands[env] || input.value.trim();
+    presetCommands[env] = null;
+    if (!command) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-inline"></span>';
+
+    try {
+      const res = await fetch(API + '/api/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: command, environment: env }),
+      });
+      const data = await res.json();
+      data.command = command;
+
+      const key = challenges[activeChallenge].id;
+      if (!cmdHistory[env]) cmdHistory[env] = {};
+      if (!cmdHistory[env][key]) cmdHistory[env][key] = [];
+      cmdHistory[env][key].push(data);
+
+      const otherEnv = env === 'unprotected' ? 'protected' : 'unprotected';
+      const otherInput = document.getElementById('input-' + otherEnv);
+      const otherVal = otherInput ? otherInput.value : '';
+      input.value = '';
+      renderChallenge();
+      const restored = document.getElementById('input-' + otherEnv);
+      if (restored && otherVal) restored.value = otherVal;
+      scrollHistory(env);
+
+      checkFlagCapture();
+    } catch(e) {
+      toast('Command failed: ' + e.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'RUN';
+    }
+  }
+
+  function scrollHistory(env) {
+    const el = document.getElementById('history-' + env);
+    if (el) el.scrollTop = el.scrollHeight;
+  }
+
+  function checkFlagCapture() {
+    const c = challenges[activeChallenge];
+    if (!c || flagState[c.flag]) return;
+
+    const key = c.id;
+    const unprot = (cmdHistory.unprotected && cmdHistory.unprotected[key]) || [];
+    const prot = (cmdHistory.protected && cmdHistory.protected[key]) || [];
+
+    let captured = false;
+
+    switch(c.flag) {
+      case 'NETWORK_LOCKDOWN':
+        captured = prot.some(e => isBlocked(e));
+        break;
+      case 'BINARY_BINDING':
+        const curlBlocked = prot.some(e => e.command.includes('curl') && isBlocked(e));
+        const pythonAllowed = prot.some(e => e.command.includes('python3') && isAllowed(e));
+        captured = curlBlocked && pythonAllowed;
+        break;
+      case 'FILESYSTEM_ESCAPE':
+        const varBlocked = prot.some(e =>
+          (e.command.includes('/var/') || e.command.includes('/dev/shm')) && isBlocked(e));
+        const tmpAllowed = prot.some(e => e.command.includes('/tmp/') && isAllowed(e));
+        captured = varBlocked && tmpAllowed;
+        break;
+      case 'L7_ENFORCEMENT':
+        const getOk = prot.some(e => !e.command.includes('-X') && isAllowed(e));
+        const postBlocked = prot.some(e => e.command.includes('POST') && isBlocked(e));
+        captured = getOk && postBlocked;
+        break;
+      case 'POLICY_HOTRELOAD':
+        const wasBlocked = prot.some(e => e.command.includes('httpbin') && isBlocked(e));
+        const wasAllowed = prot.some(e => e.command.includes('httpbin') && isAllowed(e));
+        captured = wasBlocked && wasAllowed;
+        break;
+    }
+
+    if (captured) {
+      captureFlag(c.flag);
+    }
+  }
+
+  async function captureFlag(flagName) {
+    try {
+      await fetch(API + '/api/flags/' + flagName, { method: 'POST' });
+      flagState[flagName] = true;
+      const captured = Object.values(flagState).filter(Boolean).length;
+      updateFlagCounter(captured, Object.keys(flagState).length);
+      renderTabs();
+      renderChallenge();
+      toast('Flag captured: ' + flagName, 'flag');
+    } catch(e) {}
+  }
+
+  async function switchPolicy(policy) {
+    const btn = document.getElementById(policy === 'permissive' ? 'btnPolicyPermissive' : 'btnPolicyStrict');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-inline"></span> Applying...'; }
+
+    try {
+      const res = await fetch(API + '/api/policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policy: policy }),
+      });
+      const data = await res.json();
+      if (data.detail) throw new Error(data.detail);
+      currentPolicy = policy;
+      toast('Policy switched to: ' + policy, 'info');
+      renderChallenge();
+    } catch(e) {
+      toast('Policy switch failed: ' + e.message, 'err');
+    }
+  }
+
+  function fillPreset(challengeIdx, presetIdx) {
+    const command = challenges[challengeIdx].presets[presetIdx].command;
+    const display = command.replace(/\n/g, ' ');
+    const env1 = document.getElementById('input-unprotected');
+    const env2 = document.getElementById('input-protected');
+    if (env1) env1.value = display;
+    if (env2) env2.value = display;
+    presetCommands.unprotected = command;
+    presetCommands.protected = command;
+  }
+
+  function toast(msg, type) {
+    document.querySelectorAll('.toast').forEach(t => t.remove());
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + type;
+    el.textContent = (type === 'flag' ? '⚑ ' : '') + msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // Globals
+  window._selectChallenge = function(i) { activeChallenge = i; renderTabs(); renderChallenge(); };
+  window._runCmd = runCmd;
+  window._fillPreset = fillPreset;
+  window._switchPolicy = switchPolicy;
+  window._clearPreset = function(env) { presetCommands[env] = null; };
+
+  loadChallenges();
+})();
+</script>
+</body>
+</html>

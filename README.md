@@ -13,6 +13,7 @@ OpenShell is NVIDIA's agent-first platform providing safe, sandboxed runtimes fo
 | [01-basic-openshell](demos/01-basic-openshell/) | Basic OpenShell installation | None | Default | N/A |
 | [02-opencode-keycloak](demos/02-opencode-keycloak/) | OpenCode + Keycloak OIDC + MLflow | Keycloak | OpenCode | LiteLLM |
 | [03-claude-code](demos/03-claude-code/) | Claude Code + LiteLLM + MLflow | Keycloak | Claude Code | LiteLLM |
+| [04-escape-the-shell](demos/04-escape-the-shell/) | Interactive CTF - OpenShell security layers | None | N/A | N/A |
 
 ## Prerequisites
 

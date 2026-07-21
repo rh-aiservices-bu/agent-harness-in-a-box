@@ -1,0 +1,50 @@
+# Hermes agent for OpenShell sandbox
+#
+# Flavor image built on the shared openshell-base.
+# Installs upstream Hermes agent from PyPI (no custom plugins).
+#
+# Build:
+#   podman build --platform linux/amd64 -t hermes-sandbox:latest -f Containerfile.openshell .
+#
+# Build with specific version:
+#   podman build --build-arg HERMES_VERSION=0.18.0 --platform linux/amd64 -t hermes-sandbox:latest -f Containerfile.openshell .
+
+FROM quay.io/hmoghani/openshell-base:latest
+
+LABEL name="hermes" \
+      summary="Hermes agent (NousResearch) for OpenShell sandbox"
+
+USER 0
+
+# Python 3.12 + git (required by Hermes and MLflow)
+RUN microdnf install -y --nodocs python3.12 python3.12-pip git && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
+    ln -sf /usr/bin/python3.12 /usr/bin/python && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+# Install upstream Hermes agent from PyPI (no cai-krew plugins)
+ARG HERMES_VERSION=""
+RUN if [ -n "$HERMES_VERSION" ]; then \
+        pip3.12 install --no-cache-dir "hermes-agent==${HERMES_VERSION}"; \
+    else \
+        pip3.12 install --no-cache-dir hermes-agent; \
+    fi
+
+# MLflow tracing (Python SDK + kubernetes-namespaced auth for RHOAI)
+RUN python3 -m pip install --no-cache-dir 'mlflow[kubernetes]>=3.12'
+
+# Hermes home directory structure
+RUN mkdir -p /sandbox/.hermes/{skills,sessions,logs,memories,cache} && \
+    chown -R 1001:0 /sandbox/.hermes && \
+    chmod -R 775 /sandbox/.hermes
+
+# Verify install
+RUN hermes --version
+
+USER 1001
+WORKDIR /workspace
+
+ENV AGENT_NAME=hermes \
+    HERMES_HOME=/sandbox/.hermes \
+    PATH="/sandbox/.local/bin:${PATH}"

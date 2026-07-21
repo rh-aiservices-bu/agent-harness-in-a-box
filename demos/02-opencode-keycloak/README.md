@@ -317,6 +317,45 @@ openshell inference set --provider litellm --model llama-scout-17b --role system
 openshell policy set --global --policy /tmp/policy-standard-rendered.yaml --yes
 ```
 
+### Step 10b: Choose an LLM model in OpenCode
+
+The OpenCode config at `config/opencode-config.json` defines all available LiteLLM models. It is uploaded to `/workspace/.opencode/config.json` inside the sandbox by `setup-sandbox.sh`.
+
+**Available models:**
+
+| Model ID | Name | Reasoning | Context |
+|----------|------|-----------|---------|
+| `gpt-oss-120b` | GPT OSS 120B | Yes | 128K |
+| `gemini-2.5-pro` | Gemini 2.5 Pro | Yes | 1M |
+| `llama-scout-17b` | Llama Scout 17B | No | 128K |
+| `qwen3-235b` | Qwen3 235B | Yes | 128K |
+| `minimax-m2` | MiniMax M2 | No | 128K |
+
+**Change the default model before creating the sandbox:**
+
+Edit `config/opencode-config.json` and set `"model"` and `"small_model"`:
+
+```json
+{
+  "model": "litellm/gemini-2.5-pro",
+  "small_model": "litellm/llama-scout-17b"
+}
+```
+
+**Switch models inside a running OpenCode session:**
+
+Type `/model` in the OpenCode prompt to interactively pick from the configured models.
+
+**Change the default model in an existing sandbox:**
+
+```bash
+openshell sandbox exec --name opencode-demo -- \
+    sed -i 's|"model": "litellm/.*"|"model": "litellm/qwen3-235b"|' \
+    /workspace/.opencode/config.json
+```
+
+Then restart OpenCode to pick up the change.
+
 ### Step 11: Configure RHOAI MLflow tracing (optional)
 
 `setup-sandbox.sh` configures MLflow automatically when an OCP token is available. For manual setup, see `overlays/mlflow/README.md`.

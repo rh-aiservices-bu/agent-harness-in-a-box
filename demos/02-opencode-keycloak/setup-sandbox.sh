@@ -53,14 +53,19 @@ fi
 
 step "Register LiteLLM provider"
 openshell provider delete litellm 2>/dev/null || true
-openshell provider create openai \
+openshell provider create \
     --name litellm \
-    --base-url "${LITELLM_BASE_URL}" \
-    --api-key "${LITELLM_API_KEY}"
+    --type openai \
+    --credential "OPENAI_API_KEY=${LITELLM_API_KEY}" \
+    --config "base_url=${LITELLM_BASE_URL}"
 
-step "Configure inference routing"
-openshell inference set --provider litellm --model "${LITELLM_MODEL:-gpt-oss-120b}" --role user
-openshell inference set --provider litellm --model "${LITELLM_MODEL_SMALL:-llama-scout-17b}" --role system
+step "Configure inference routing (optional)"
+openshell inference set --provider litellm --model "${LITELLM_MODEL:-gemini-2.5-pro}" --no-verify 2>/dev/null \
+    && info "User inference route set" \
+    || warn "inference set not supported by this gateway version - OpenCode uses direct OPENAI_BASE_URL"
+openshell inference set --provider litellm --model "${LITELLM_MODEL_SMALL:-llama-scout-17b}" --system --no-verify 2>/dev/null \
+    && info "System inference route set" \
+    || true
 
 step "Create sandbox: $SANDBOX_NAME"
 openshell sandbox delete "$SANDBOX_NAME" 2>/dev/null || true

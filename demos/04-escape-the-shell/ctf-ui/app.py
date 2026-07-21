@@ -348,6 +348,13 @@ async def get_flags():
     }
 
 
+@app.post("/api/flags/reset")
+async def reset_flags():
+    for key in flags:
+        flags[key] = False
+    return {"status": "reset", "flags": flags}
+
+
 @app.post("/api/flags/{flag_name}")
 async def capture_flag(flag_name: str):
     if flag_name not in flags:
@@ -355,10 +362,3 @@ async def capture_flag(flag_name: str):
     flags[flag_name] = True
     log.info("Flag captured: %s", flag_name)
     return {"flag": flag_name, "captured": True}
-
-
-@app.post("/api/flags/reset")
-async def reset_flags():
-    for key in flags:
-        flags[key] = False
-    return {"status": "reset", "flags": flags}

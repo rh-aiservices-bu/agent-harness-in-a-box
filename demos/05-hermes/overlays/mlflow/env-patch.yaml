@@ -1,0 +1,11 @@
+env:
+  - name: MLFLOW_TRACKING_URI
+    value: ""
+  - name: MLFLOW_TRACKING_TOKEN
+    value: ""
+  - name: MLFLOW_TRACKING_INSECURE_TLS
+    value: "true"
+  - name: MLFLOW_EXPERIMENT_NAME
+    value: "hermes-sandbox"
+  - name: MLFLOW_WORKSPACE
+    value: "openshell"

@@ -1,7 +1,7 @@
 # Standard sandbox policy for Hermes agent.
-# Allows inference (LiteLLM), PyPI (skill installs), GitHub (read-only),
-# NousResearch (model catalog), and RHOAI MLflow tracing.
-# Blocks direct AI APIs, web browsing, and GitHub write operations.
+# Allows inference (LiteLLM + OpenRouter), PyPI (skill installs), GitHub (read-only),
+# NousResearch (model catalog), Mattermost, and RHOAI MLflow tracing.
+# Blocks web browsing and GitHub write operations.
 #
 # Template: replace __OCP_APPS_DOMAIN__ before applying.
 # Apply:  openshell policy set [--wait] <sandbox-name> --policy <rendered-file>
@@ -20,6 +20,7 @@ filesystem_policy:
     - /proc
     - /dev/urandom
     - /etc
+    - /app
     - /opt
     - /var/log
   read_write:
@@ -58,6 +59,20 @@ network_policies:
       - { path: /usr/bin/python3.12 }
       - { path: "/usr/local/bin/hermes" }
       - { path: "/sandbox/.uv/python/**" }
+
+  openrouter:
+    name: "OpenRouter"
+    endpoints:
+      - host: openrouter.ai
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3.12 }
+      - { path: "/usr/local/bin/hermes" }
 
   pypi:
     name: "PyPI"
@@ -127,6 +142,20 @@ network_policies:
         access: full
     binaries:
       - { path: /usr/bin/curl }
+
+  mattermost:
+    name: "Mattermost"
+    endpoints:
+      - host: "mattermost-mattermost.__OCP_APPS_DOMAIN__"
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        access: full
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3 }
+      - { path: /usr/bin/python3.12 }
+      - { path: "/usr/local/bin/hermes" }
 
   mlflow_rhoai:
     name: "RHOAI MLflow"

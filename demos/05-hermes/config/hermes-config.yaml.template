@@ -29,13 +29,18 @@ agent:
   task_completion_guidance: true
   parallel_tool_call_guidance: true
   environment_probe: true
+  environment_hint: |
+    You are running inside an OpenShell sandbox on OpenShift.
+    Home directory: /sandbox (writable)
+    Hermes data: /sandbox/.hermes (writable)
+    System paths (/usr, /lib, /etc): read-only via Landlock
+    Network: outbound restricted to LiteLLM, PyPI, GitHub (read-only), NousResearch.
+    No direct internet access. Use LiteLLM for inference.
   coding_context: auto
-  verify_on_stop: true
+  verify_on_stop: auto
   gateway_timeout_warning: 900
   clarify_timeout: 600
   image_input_mode: auto
-  reasoning_effort: medium
-  verbose: false
   disabled_toolsets:
     - web
     - browser
@@ -55,12 +60,26 @@ terminal:
   timeout: 180
   persistent_shell: true
   auto_source_bashrc: true
+  cwd: /workspace
+  home_mode: auto
+
+# --- Display ---
+display:
+  compact: false
+  streaming: true
+  show_reasoning: false
+  inline_diffs: true
+  file_mutation_verifier: true
+  interface: cli
+  personality: ""
+
+# --- Streaming ---
+streaming:
+  enabled: true
 
 # --- Code execution ---
 code_execution:
   mode: project
-  timeout: 300
-  max_tool_calls: 50
 
 # --- Sub-agent delegation ---
 delegation:
@@ -156,14 +175,6 @@ security:
 approvals:
   mode: manual
   timeout: 60
-
-# --- Display ---
-display:
-  compact: false
-  streaming: true
-  show_reasoning: false
-  inline_diffs: true
-  file_mutation_verifier: true
 
 # --- Logging ---
 logging:
